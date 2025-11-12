@@ -23,13 +23,14 @@ public class ParserEngine {
 
     @Data @AllArgsConstructor
     public static class ParsedRow {
-        private LocalDateTime transactionDateTime;  // CHANGED: Instant -> LocalDateTime (no UTC conversion)
+        private LocalDateTime transactionDateTime; // Local, no UTC conversion
         private BigDecimal amount;
         private BigDecimal balance;   // nullable
         private String reference;
         private String orderId;
         private String utr;
         private boolean payIn;
+        private String accountNo;     // detected/override account number (digits only)
     }
 
     public enum FileKind { CSV, XLSX, XLS, PDF }
@@ -42,12 +43,59 @@ public class ParserEngine {
 
     /** Header context captured at header-detection time so we can guard neighbor probing against any other headers */
     private static final class ExcelContext {
-        final List<String> headerByCol;                   // merged header text per column (post-filter to expect)
+        final List<String> headerByCol;                   // merged header text per column (normalized later via norm())
         final Map<String, List<String>> expectSynonyms;   // headers.search.expect from config (field -> synonyms)
         ExcelContext(List<String> headerByCol, Map<String, List<String>> expectSynonyms) {
             this.headerByCol = headerByCol;
             this.expectSynonyms = expectSynonyms;
         }
+    }
+
+    /** Account detection profile per parserKey (bank). */
+    private static final class AccountProfile {
+        final List<String> labelSynonyms;  // e.g., "account no", "a/c no", "number"
+        final int headerSearchRows;        // scan early rows only
+        final List<Integer> likelyCols;    // zero-based probable columns to probe (e.g., L..N)
+        final Pattern valuePattern;        // digits length rule
+        AccountProfile(List<String> labelSynonyms, int headerSearchRows, List<Integer> likelyCols, Pattern valuePattern) {
+            this.labelSynonyms = labelSynonyms;
+            this.headerSearchRows = headerSearchRows;
+            this.likelyCols = likelyCols;
+            this.valuePattern = valuePattern;
+        }
+    }
+
+    /** Registry of parserKey → AccountProfile, with a DEFAULT. */
+    private static final Map<String, AccountProfile> ACCOUNT_PROFILES;
+    static {
+        Pattern defaultDigits = Pattern.compile("\\b\\d{9,20}\\b");
+
+        AccountProfile DEFAULT = new AccountProfile(
+                Arrays.asList(
+                        "account no", "account number", "a/c no", "a/c number",
+                        "acc no", "acc number", "number", "no.", "ac no", "ac number"
+                ),
+                80,                       // scan first 80 rows
+                Arrays.asList(10,11,12,13,14), // likely columns around K..O (0-based)
+                defaultDigits
+        );
+
+        AccountProfile KGB = new AccountProfile(
+                Arrays.asList(
+                        "number", "account no", "account number", "a/c no", "a/c number"
+                ),
+                80,
+                Arrays.asList(11,12,13),  // L..N are common in your samples
+                defaultDigits
+        );
+
+        Map<String, AccountProfile> map = new HashMap<>();
+        map.put("_default", DEFAULT);
+        map.put("kgb", KGB);
+        // Add more banks here as needed:
+        // map.put("sbi", new AccountProfile(...));
+        // map.put("federal", new AccountProfile(...));
+        ACCOUNT_PROFILES = Collections.unmodifiableMap(map);
     }
 
     public static FileKind detectKind(String filename, String contentType) {
@@ -72,16 +120,19 @@ public class ParserEngine {
 
         FileKind kind = detectKind(filename, contentType);
         return switch (kind) {
-            case CSV -> parseCsv(in, bankCfg.getCsv());
-            case XLSX -> parseExcel(in, bankCfg.getXlsx());
-            case XLS -> parseExcel(in, bankCfg.getXls());
-            case PDF -> parsePdf(in, bankCfg.getPdf());
+            case CSV  -> parseCsv(in, bankCfg.getCsv(), accountNoOverride);
+            case XLSX -> parseExcel(in, bankCfg.getXlsx(), accountNoOverride, bankCfg.getParserKey());
+            case XLS  -> parseExcel(in, bankCfg.getXls(),  accountNoOverride, bankCfg.getParserKey());
+            case PDF  -> parsePdf(in, bankCfg.getPdf(), accountNoOverride);
         };
     }
 
     // ================= CSV =================
-    private static List<ParsedRow> parseCsv(InputStream in, ParserConfig.FileTypeConfig cfg) throws IOException {
+    private static List<ParsedRow> parseCsv(InputStream in, ParserConfig.FileTypeConfig cfg,
+                                            String accountNoOverride) throws IOException {
         var rows = new ArrayList<ParsedRow>();
+        String accNo = cleanupAccount(accountNoOverride); // CSV heuristic not implemented; use override if present
+
         Charset cs = Charset.forName(Optional.ofNullable(cfg.getCsv()).map(ParserConfig.Csv::getCharset).orElse("UTF-8"));
         char delim = Optional.ofNullable(cfg.getCsv()).map(c -> c.getDelimiter() != null ? c.getDelimiter().charAt(0) : ',').orElse(',');
         int skip = Optional.ofNullable(cfg.getCsv()).map(c -> c.getSkipRows() != null ? c.getSkipRows() : 0).orElse(0);
@@ -125,6 +176,20 @@ public class ParserEngine {
                     }
                     if (idx == null) throw new IllegalStateException("CSV header not found by search/multi-row");
                 }
+
+                // MAIN LOOP with repeated-header skipping
+                for (int i = Math.max(skip, startRow); i < all.size(); i++) {
+                    if (isRepeatedHeaderBandCsv(all, i, Optional.ofNullable(cfg.getHeaders().getSearch().getMultiRowCount()).orElse(1),
+                            cfg.getHeaders().getSearch().getExpect(), Optional.ofNullable(cfg.getHeaders().getSearch().getMergeSeparator()).orElse(" "))) {
+                        i += (Optional.ofNullable(cfg.getHeaders().getSearch().getMultiRowCount()).orElse(1) - 1);
+                        continue;
+                    }
+                    var rec = all.get(i);
+                    var pr = mapCsvRecord(rec, idx, cfg, accNo);
+                    if (pr != null) rows.add(pr);
+                }
+                return rows;
+
             } else { // fixed
                 idx = fixedIndex(cfg);
                 startRow = cfg.getHeaders().getFixed().getRowStart();
@@ -132,11 +197,20 @@ public class ParserEngine {
 
             for (int i = Math.max(skip, startRow); i < all.size(); i++) {
                 var rec = all.get(i);
-                var pr = mapCsvRecord(rec, idx, cfg);
+                var pr = mapCsvRecord(rec, idx, cfg, accNo);
                 if (pr != null) rows.add(pr);
             }
         }
         return rows;
+    }
+
+    private static boolean isRepeatedHeaderBandCsv(List<CSVRecord> all, int startRow, int mrc,
+                                                   Map<String, List<String>> expect, String join) {
+        if (mrc <= 0 || startRow < 0) return false;
+        if (startRow + mrc - 1 >= all.size()) return false;
+        var merged = mergeCsvHeader(all, startRow, startRow + mrc - 1, join);
+        var candidate = mapMergedHeaderToIndex(merged, expect);
+        return isSufficientMapping(candidate);
     }
 
     private static List<String> mergeCsvHeader(List<CSVRecord> all, int from, int to, String join) {
@@ -175,11 +249,18 @@ public class ParserEngine {
     }
 
     // ================= Excel (XLS/XLSX) =================
-    private static List<ParsedRow> parseExcel(InputStream in, ParserConfig.FileTypeConfig cfg) throws IOException {
+    private static List<ParsedRow> parseExcel(InputStream in, ParserConfig.FileTypeConfig cfg,
+                                              String accountNoOverride, String parserKey) throws IOException {
         var rows = new ArrayList<ParsedRow>();
         try (Workbook wb = WorkbookFactory.create(in)) {
             int sheetIdx = Integer.parseInt(Optional.ofNullable(cfg.getSheetIndex()).orElse("0"));
             Sheet sheet = wb.getSheetAt(sheetIdx);
+
+            // Detect account number if not provided
+            String accountNo = cleanupAccount(accountNoOverride);
+            if (isBlank(accountNo)) {
+                accountNo = detectAccountFromExcel(sheet, parserKey); // parserKey-aware
+            }
 
             Map<String,Integer> idx;
             int startRow;
@@ -196,7 +277,7 @@ public class ParserEngine {
                     int from = search.getFixedHeaderRows().getFrom();
                     int to   = search.getFixedHeaderRows().getTo();
                     if (oneBased) { from--; to--; }
-                    var merged = mergeExcelHeaderFiltered(sheet, from, to, join, search.getExpect());
+                    var merged = mergeExcelHeader(sheet, from, to, join);
                     idx = mapMergedHeaderToIndex(merged, search.getExpect());
                     if (!isSufficientMapping(idx)) throw new IllegalStateException("Excel header mapping insufficient");
                     startRow = to + Optional.ofNullable(search.getRowStartOffset()).orElse(1);
@@ -208,7 +289,7 @@ public class ParserEngine {
                     idx = null; startRow = -1;
                     ExcelContext foundCtx = null;
                     for (int srow = from; srow <= to - (mrc - 1); srow++) {
-                        var merged = mergeExcelHeaderFiltered(sheet, srow, srow + mrc - 1, join, search.getExpect());
+                        var merged = mergeExcelHeader(sheet, srow, srow + mrc - 1, join);
                         var candidate = mapMergedHeaderToIndex(merged, search.getExpect());
                         if (isSufficientMapping(candidate)) {
                             idx = candidate;
@@ -220,10 +301,49 @@ public class ParserEngine {
                     if (idx == null) throw new IllegalStateException("Excel header not found by search/multi-row");
                     ctx = foundCtx;
                 }
+
+                // MAIN LOOP with repeated-header skipping
+                for (int r = startRow; r <= sheet.getLastRowNum(); r++) {
+                    if (looksLikeHeaderBandExcel(sheet, r,
+                            Optional.ofNullable(cfg.getHeaders().getSearch().getMultiRowCount()).orElse(1),
+                            cfg.getHeaders().getSearch().getExpect(),
+                            Optional.ofNullable(cfg.getHeaders().getSearch().getMergeSeparator()).orElse(" "))) {
+                        r += (Optional.ofNullable(cfg.getHeaders().getSearch().getMultiRowCount()).orElse(1) - 1);
+                        continue;
+                    }
+
+                    Row row = sheet.getRow(r);
+                    if (row == null) continue;
+                    if (stopNow(row, cfg.getRowStop())) break;
+
+                    String ref = readExcelFlexible(sheet, row, idx, "reference", ColumnKind.REFERENCE, cfg, ctx);
+                    BigDecimal amount = deriveAmount(
+                            readExcelFlexible(sheet, row, idx, "amount",  ColumnKind.AMOUNT,  cfg, ctx),
+                            readExcelFlexible(sheet, row, idx, "credit",  ColumnKind.CREDIT,  cfg, ctx),
+                            readExcelFlexible(sheet, row, idx, "debit",   ColumnKind.DEBIT,   cfg, ctx),
+                            cfg
+                    );
+                    // Skip debit/negative/zero rows
+                    if (amount == null || amount.signum() <= 0) continue;
+
+                    BigDecimal balance = readDecimal(readExcelFlexible(sheet, row, idx, "balance", ColumnKind.BALANCE, cfg, ctx), cfg);
+                    LocalDateTime dt = parseDateTime(
+                            readExcelFlexible(sheet, row, idx, "date", ColumnKind.DATE, cfg, ctx),
+                            readExcelFlexible(sheet, row, idx, "time", ColumnKind.TIME, cfg, ctx),
+                            cfg
+                    );
+
+                    var parsedRef = parseReference(ref, cfg.getReference());
+                    boolean payIn = computePayIn(amount, parsedRef.orderId, parsedRef.utr, ref, cfg.getPayInRule());
+
+                    rows.add(new ParsedRow(dt, amount, balance, ref, parsedRef.orderId, parsedRef.utr, payIn, accountNo));
+                }
+                return rows;
+
             } else { // fixed
                 idx = fixedIndex(cfg);
                 startRow = cfg.getHeaders().getFixed().getRowStart();
-                ctx = null; // no header band available in fixed mode
+                ctx = null;
             }
 
             for (int r = startRow; r <= sheet.getLastRowNum(); r++) {
@@ -238,81 +358,59 @@ public class ParserEngine {
                         readExcelFlexible(sheet, row, idx, "debit",   ColumnKind.DEBIT,   cfg, ctx),
                         cfg
                 );
-                BigDecimal balance = readDecimal(readExcelFlexible(sheet, row, idx, "balance", ColumnKind.BALANCE, cfg, ctx), cfg);
+                if (amount == null || amount.signum() <= 0) continue;
 
-                // CHANGED: keep LocalDateTime (no conversion to Instant/UTC)
+                BigDecimal balance = readDecimal(readExcelFlexible(sheet, row, idx, "balance", ColumnKind.BALANCE, cfg, ctx), cfg);
                 LocalDateTime dt = parseDateTime(
                         readExcelFlexible(sheet, row, idx, "date", ColumnKind.DATE, cfg, ctx),
                         readExcelFlexible(sheet, row, idx, "time", ColumnKind.TIME, cfg, ctx),
                         cfg
                 );
 
-                rows.add(new ParsedRow(dt, amount, balance, ref, parseReference(ref, cfg.getReference()).orderId,
-                        parseReference(ref, cfg.getReference()).utr,
-                        computePayIn(amount,
-                                parseReference(ref, cfg.getReference()).orderId,
-                                parseReference(ref, cfg.getReference()).utr,
-                                ref, cfg.getPayInRule())));
+                var parsedRef = parseReference(ref, cfg.getReference());
+                boolean payIn = computePayIn(amount, parsedRef.orderId, parsedRef.utr, ref, cfg.getPayInRule());
+
+                rows.add(new ParsedRow(dt, amount, balance, ref, parsedRef.orderId, parsedRef.utr, payIn, accountNo));
             }
         }
         return rows;
     }
 
-    /**
-     * Expect-aware header merge:
-     *  - Scans header rows [fromRow..toRow]
-     *  - Keeps only substrings that match expect synonyms (field -> list of variants)
-     *  - Picks the strongest (longest) synonym seen per column
-     *  - Fill-forwards to the right to cover visually merged header bands
-     */
-    private static List<String> mergeExcelHeaderFiltered(Sheet sheet, int fromRow, int toRow, String join,
-                                                         Map<String, List<String>> expect) {
+    private static boolean looksLikeHeaderBandExcel(Sheet sheet, int startRow, int mrc,
+                                                    Map<String, List<String>> expect, String join) {
+        if (mrc <= 0) return false;
+        if (startRow < 0 || startRow + mrc - 1 > sheet.getLastRowNum()) return false;
+        var merged = mergeExcelHeader(sheet, startRow, startRow + mrc - 1, join);
+        var candidate = mapMergedHeaderToIndex(merged, expect);
+        return isSufficientMapping(candidate);
+    }
+
+    private static List<String> mergeExcelHeader(Sheet sheet, int fromRow, int toRow, String join) {
         int maxCols = 0;
         for (int r = fromRow; r <= toRow; r++) {
             Row row = sheet.getRow(r);
             if (row != null) maxCols = Math.max(maxCols, row.getLastCellNum());
         }
         List<String> merged = new ArrayList<>(Collections.nCopies(Math.max(maxCols,0), ""));
-
         for (int c = 0; c < merged.size(); c++) {
-            String bestSynonym = ""; // keep the most specific (longest) match
+            StringBuilder sb = new StringBuilder();
             for (int r = fromRow; r <= toRow; r++) {
                 Row row = sheet.getRow(r);
-                String raw = (row == null) ? "" : Optional.ofNullable(getCellString(row.getCell(c))).orElse("");
-                String normCell = norm(raw);
-                if (normCell.isBlank()) continue;
-
-                String matched = selectBestSynonym(normCell, expect);
-                if (matched != null && matched.length() > bestSynonym.length()) {
-                    bestSynonym = matched;
+                String v = (row == null) ? "" : Optional.ofNullable(getCellString(row.getCell(c))).orElse("");
+                v = v.replace('\u00A0',' ').trim();
+                if (!v.isBlank()) {
+                    if (sb.length() > 0) sb.append(join);
+                    sb.append(v);
                 }
             }
-            merged.set(c, bestSynonym);
+            merged.set(c, sb.toString());
         }
-
+        // Fill-forward across blanks (so V..X inherits header from U when U..X merged)
         propagateHeaderRight(merged);
         return merged;
     }
 
-    private static String selectBestSynonym(String normCell, Map<String, List<String>> expect) {
-        if (expect == null) return null;
-        String best = null;
-        int bestLen = -1;
-        for (Map.Entry<String, List<String>> e : expect.entrySet()) {
-            for (String syn : e.getValue()) {
-                String ns = norm(syn);
-                if (ns.isBlank()) continue;
-                if (normCell.equals(ns) || normCell.contains(ns)) {
-                    if (ns.length() > bestLen) {
-                        best = ns;
-                        bestLen = ns.length();
-                    }
-                }
-            }
-        }
-        return best;
-    }
-
+    /** Fill-forward: copy the last non-blank header text over subsequent blank columns until the next non-blank. */
     private static void propagateHeaderRight(List<String> headerByCol) {
         String last = "";
         for (int i = 0; i < headerByCol.size(); i++) {
@@ -348,19 +446,21 @@ public class ParserEngine {
     }
     private static void putIfNotNull(Map<String,Integer> m, String k, Integer v) { if (v != null) m.put(k, v); }
 
-    private static ParsedRow mapCsvRecord(CSVRecord rec, Map<String,Integer> idx, ParserConfig.FileTypeConfig cfg) {
+    private static ParsedRow mapCsvRecord(CSVRecord rec, Map<String,Integer> idx, ParserConfig.FileTypeConfig cfg,
+                                          String accountNo) {
         try {
             String ref = read(rec, idx.get("reference"));
             BigDecimal amount = deriveAmount(read(rec, idx.get("amount")),
                     read(rec, idx.get("credit")), read(rec, idx.get("debit")), cfg);
-            BigDecimal balance = readDecimal(read(rec, idx.get("balance")), cfg);
+            if (amount == null || amount.signum() <= 0) return null;
 
+            BigDecimal balance = readDecimal(read(rec, idx.get("balance")), cfg);
             LocalDateTime dt = parseDateTime(read(rec, idx.get("date")), read(rec, idx.get("time")), cfg);
 
             var parsedRef = parseReference(ref, cfg.getReference());
             boolean payIn = computePayIn(amount, parsedRef.orderId, parsedRef.utr, ref, cfg.getPayInRule());
 
-            return new ParsedRow(dt, amount, balance, ref, parsedRef.orderId, parsedRef.utr, payIn);
+            return new ParsedRow(dt, amount, balance, ref, parsedRef.orderId, parsedRef.utr, payIn, accountNo);
         } catch (Exception ex) {
             return null;
         }
@@ -391,15 +491,16 @@ public class ParserEngine {
 
     private static String rowToLine(Row row) {
         StringBuilder sb = new StringBuilder();
-        for (int c = 0; c < row.getLastCellNum(); c++) {
+        short lastCell = row.getLastCellNum(); // -1 for empty row
+        int cols = Math.max(0, lastCell);
+        for (int c = 0; c < cols; c++) {
             String s = Optional.ofNullable(getCellString(row.getCell(c))).orElse("");
             sb.append(s).append(" ");
         }
         return sb.toString().trim();
     }
 
-    // === Flexible Excel reading: respect merged regions AND avoid neighbors owned by others (including unmapped headers)
-    //     When we encounter another header's value band while offsetting, we stop scanning further in that direction. ===
+    // === Flexible Excel reading: respect merged regions AND avoid neighbors owned by others (including unmapped headers) ===
     private static String readExcelFlexible(Sheet sheet, Row row, Map<String,Integer> idx, String fieldKey,
                                             ColumnKind kind, ParserConfig.FileTypeConfig cfg, ExcelContext ctx) {
         if (row == null) return null;
@@ -412,24 +513,19 @@ public class ParserEngine {
         String val = readCellOrMergedTopLeft(sheet, r, col);
         if (isAcceptable(val, kind, cfg)) return val;
 
-        // 2a) scan RIGHT; stop entirely if we hit another header's value region
-        for (int c = col + 1; c <= col + EXCEL_MERGE_NEIGHBOR_SCAN; c++) {
-            if (belongsToAnotherFieldRegion(sheet, r, idx, fieldKey, c, ctx)) {
-                break; // STOP scanning right beyond another column's value band
+        // 2) probe neighbors with strong guards
+        for (int off = 1; off <= EXCEL_MERGE_NEIGHBOR_SCAN; off++) {
+            int rightCol = col + off;
+            if (!belongsToAnotherFieldRegion(sheet, r, idx, fieldKey, rightCol, ctx)) {
+                String right = readCellOrMergedTopLeft(sheet, r, rightCol);
+                if (isAcceptable(right, kind, cfg)) return right;
             }
-            String v = readCellOrMergedTopLeft(sheet, r, c);
-            if (isAcceptable(v, kind, cfg)) return v;
-        }
-
-        // 2b) scan LEFT; stop entirely if we hit another header's value region
-        for (int c = col - 1; c >= Math.max(0, col - EXCEL_MERGE_NEIGHBOR_SCAN); c--) {
-            if (belongsToAnotherFieldRegion(sheet, r, idx, fieldKey, c, ctx)) {
-                break; // STOP scanning left beyond another column's value band
+            int leftCol = col - off;
+            if (leftCol >= 0 && !belongsToAnotherFieldRegion(sheet, r, idx, fieldKey, leftCol, ctx)) {
+                String left = readCellOrMergedTopLeft(sheet, r, leftCol);
+                if (isAcceptable(left, kind, cfg)) return left;
             }
-            String v = readCellOrMergedTopLeft(sheet, r, c);
-            if (isAcceptable(v, kind, cfg)) return v;
         }
-
         return null;
     }
 
@@ -438,8 +534,7 @@ public class ParserEngine {
      *  (A) exactly another field's mapped header column, OR
      *  (B) inside a merged region whose column span contains the header column of some OTHER mapped field, OR
      *  (C) has a header text (from header band) that does NOT match the current field's synonyms
-     *      -> this blocks unmapped-but-real columns like "Instrument Id".
-     *  NOTE: The caller stops scanning further in that direction when this returns true.
+     *      -> blocks unmapped-but-real columns like "Instrument Id".
      */
     private static boolean belongsToAnotherFieldRegion(Sheet sheet, int rowIndex,
                                                        Map<String,Integer> idx,
@@ -448,31 +543,27 @@ public class ParserEngine {
                                                        ExcelContext ctx) {
         if (probeCol < 0) return true; // out of bounds -> treat as forbidden
 
-        // C) Header text ownership from header band (unmapped headers like "Instrument Id")
+        // (C) Header text ownership from header band (unmapped headers like "Instrument Id")
         if (ctx != null && ctx.headerByCol != null && probeCol < ctx.headerByCol.size()) {
             String headerText = norm(ctx.headerByCol.get(probeCol));
             if (!headerText.isBlank()) {
+                // if this header text does NOT correspond to the current field's synonyms, it's someone else's column
                 if (!headerMatchesField(headerText, currentField, ctx.expectSynonyms)) {
                     return true;
                 }
             }
         }
 
-        // A) & B) legacy mapped-field guard
+        // (A) & (B)
         for (Map.Entry<String,Integer> e : idx.entrySet()) {
             String otherField = e.getKey();
             Integer otherHeaderCol = e.getValue();
             if (otherHeaderCol == null) continue;
             if (otherField.equals(currentField)) continue;
 
-            // exact same column as another field’s mapped header -> don't use
             if (otherHeaderCol == probeCol) {
                 return true;
             }
-
-            // If the probed cell sits in a merged region, and that region spans
-            // the header column of another field, then this probed cell belongs
-            // to that other field's value block -> don't use.
             CellRangeAddress region = findMergedRegion(sheet, rowIndex, probeCol);
             if (region != null) {
                 if (otherHeaderCol >= region.getFirstColumn() && otherHeaderCol <= region.getLastColumn()) {
@@ -503,7 +594,6 @@ public class ParserEngine {
             String val = getCellString(direct);
             if (val != null && !val.trim().isEmpty()) return val.trim();
         }
-
         CellRangeAddress region = findMergedRegion(sheet, rowIndex, colIndex);
         if (region != null) {
             Row topRow = sheet.getRow(region.getFirstRow());
@@ -537,9 +627,12 @@ public class ParserEngine {
 
         switch (kind) {
             case CREDIT, DEBIT, AMOUNT, BALANCE:
+                // Only accept neighbors if they are truly numeric in this bank's format
                 return readDecimal(val, cfg) != null;
+
+            // DATE/TIME/REFERENCE/OTHER: any non-blank string is okay
             default:
-                return true; // DATE/TIME/REFERENCE/OTHER
+                return true;
         }
     }
 
@@ -547,7 +640,6 @@ public class ParserEngine {
         if (cell == null) return null;
         if (cell.getCellType() == CellType.NUMERIC) {
             if (DateUtil.isCellDateFormatted(cell)) {
-                // returns the formatted wall-clock LocalDateTime from Excel cell (no UTC conversion)
                 return cell.getLocalDateTimeCellValue().toString();
             }
             double d = cell.getNumericCellValue();
@@ -564,13 +656,17 @@ public class ParserEngine {
         return cell; // simplified; a real evaluator can be wired if needed
     }
 
-    // ================= PDF =================
-    private static List<ParsedRow> parsePdf(InputStream in, ParserConfig.PdfConfig cfg) throws IOException {
+    // ================= PDF (unchanged table logic) =================
+    private static List<ParsedRow> parsePdf(InputStream in, ParserConfig.PdfConfig cfg,
+                                            String accountNoOverride) throws IOException {
         var rows = new ArrayList<ParsedRow>();
+        String accountNo = cleanupAccount(accountNoOverride); // override if present
+
         try (PDDocument doc = PDDocument.load(in)) {
             var stripper = new PDFTextStripper();
             String text = stripper.getText(doc);
 
+            // slice table region
             String body = text;
             if (cfg.getPdfTable().getStartAfterRegex() != null) {
                 var m = Pattern.compile(cfg.getPdfTable().getStartAfterRegex(), Pattern.MULTILINE).matcher(text);
@@ -581,6 +677,7 @@ public class ParserEngine {
                 if (m.find()) body = body.substring(0, m.start());
             }
 
+            // parse lines
             Pattern line = Pattern.compile(cfg.getPdfTable().getLinePattern());
             var scanner = new Scanner(new StringReader(body));
             while (scanner.hasNextLine()) {
@@ -597,12 +694,14 @@ public class ParserEngine {
 
                 LocalDateTime dt = parseDateTime(date, null, cfg.getDateParse());
                 BigDecimal amt = deriveAmount(amount, credit, debit, cfg);
+                if (amt == null || amt.signum() <= 0) continue;
+
                 BigDecimal bal = readDecimal(balance, cfg);
 
                 var parsedRef = parseReference(ref, cfg.getReference());
                 boolean payIn = computePayIn(amt, parsedRef.orderId, parsedRef.utr, ref, cfg.getPayInRule());
 
-                rows.add(new ParsedRow(dt, amt, bal, ref, parsedRef.orderId, parsedRef.utr, payIn));
+                rows.add(new ParsedRow(dt, amt, bal, ref, parsedRef.orderId, parsedRef.utr, payIn, accountNo));
             }
         }
         return rows;
@@ -699,101 +798,53 @@ public class ParserEngine {
         return negParen ? val.negate() : val;
     }
 
-    // ---------- CHANGED: return LocalDateTime, never Instant ----------
+    // === DateTime parsing that returns LocalDateTime (no UTC conversion) ===
     private static LocalDateTime parseDateTime(String date, String time, ParserConfig.FileTypeConfig cfg) {
-        if (cfg.getDateParse() == null) return null;
-        return parseDateTime(date, time, cfg.getDateParse());
-    }
-
-    private static LocalDateTime parseDateTime(String date, String time, ParserConfig.DateParse cfg) {
-        if (cfg == null) return null;
-
-        // 1) Excel serial numbers
-        if ("excelSerial".equalsIgnoreCase(cfg.getInput())) {
+        if (cfg.getDateParse() != null && "excelSerial".equalsIgnoreCase(cfg.getDateParse().getInput())) {
             try {
-                // If a clean double, interpret via POI then KEEP as LocalDateTime
-                double serial = Double.parseDouble(date.trim());
-                // Use POI utility to get java.util.Date, then convert to LocalDateTime in system default
-                LocalDateTime fromSerial = LocalDateTime.ofInstant(
-                        DateUtil.getJavaDate(serial).toInstant(), ZoneId.systemDefault());
-                // If a time string is provided separately, prefer that; otherwise keep serial's time
-                if (time != null && !time.isBlank()) {
-                    LocalTime lt = parseTimeFlexible(time, cfg.getTimeFormat());
-                    return LocalDateTime.of(fromSerial.toLocalDate(), lt);
-                }
-                return fromSerial;
-            } catch (Exception ignore) {
-                // fall through to other strategies
-            }
+                double serial = Double.parseDouble(date);
+                ZoneId zone = ZoneId.of("Asia/Kolkata");
+                return LocalDateTime.ofInstant(DateUtil.getJavaDate(serial).toInstant(), zone);
+            } catch (Exception ignore) { /* fall through */ }
         }
-
-        // 2) ISO forms coming from getCellString() of a DATE cell (e.g., "2025-10-16T00:00")
-        LocalDateTime iso = tryParseIsoLocalDateTime(date);
-        if (iso != null) {
-            if (time != null && !time.isBlank()) {
-                LocalTime lt = parseTimeFlexible(time, cfg.getTimeFormat());
-                return LocalDateTime.of(iso.toLocalDate(), lt);
-            }
-            return iso;
-        }
-        LocalDate isoD = tryParseIsoLocalDate(date);
-        if (isoD != null) {
-            LocalTime lt = (time != null && !time.isBlank())
-                    ? parseTimeFlexible(time, cfg.getTimeFormat())
-                    : LocalTime.MIDNIGHT;
-            return LocalDateTime.of(isoD, lt);
-        }
-
-        // 3) Explicit formatting
-        String dfmt = Optional.ofNullable(cfg.getFormat()).orElse("dd/MM/yyyy");
-        LocalDate d = (date == null || date.isBlank())
-                ? LocalDate.now()
-                : LocalDate.parse(date.trim(), DateTimeFormatter.ofPattern(dfmt));
+        if (cfg.getDateParse() == null) return null;
+        String fmt = Optional.ofNullable(cfg.getDateParse().getFormat()).orElse("dd/MM/yyyy");
+        DateTimeFormatter df = DateTimeFormatter.ofPattern(fmt);
+        LocalDate d = (date == null || date.isBlank()) ? LocalDate.now() : LocalDate.parse(date.trim(), df);
 
         LocalTime t = LocalTime.MIDNIGHT;
         if (time != null && !time.isBlank()) {
-            t = parseTimeFlexible(time, cfg.getTimeFormat());
+            String tfmt = Optional.ofNullable(cfg.getDateParse().getTimeFormat()).orElse("HH:mm:ss");
+            DateTimeFormatter tf = DateTimeFormatter.ofPattern(tfmt);
+            t = LocalTime.parse(time.trim(), tf);
         }
         return LocalDateTime.of(d, t);
     }
 
-    private static LocalDateTime tryParseIsoLocalDateTime(String s) {
-        try {
-            if (s != null && s.contains("T")) {
-                return LocalDateTime.parse(s.trim(), DateTimeFormatter.ISO_LOCAL_DATE_TIME);
-            }
-        } catch (Exception ignored) { }
-        return null;
-    }
-
-    private static LocalDate tryParseIsoLocalDate(String s) {
-        try {
-            if (s != null && !s.isBlank() && !s.contains("T")) {
-                return LocalDate.parse(s.trim(), DateTimeFormatter.ISO_LOCAL_DATE);
-            }
-        } catch (Exception ignored) { }
-        return null;
-    }
-
-    private static LocalTime parseTimeFlexible(String time, String configuredFmt) {
-        String tfmt = Optional.ofNullable(configuredFmt).orElse("HH:mm:ss");
-        try {
-            return LocalTime.parse(time.trim(), DateTimeFormatter.ofPattern(tfmt));
-        } catch (Exception e) {
-            // fallback: try common shorter formats
-            for (String alt : new String[]{"HH:mm", "H:mm", "HHmm", "h:mm a"}) {
-                try {
-                    return LocalTime.parse(time.trim(), DateTimeFormatter.ofPattern(alt));
-                } catch (Exception ignored) {}
-            }
-            return LocalTime.MIDNIGHT;
+    private static LocalDateTime parseDateTime(String date, String time, ParserConfig.DateParse cfg) {
+        if (cfg != null && "excelSerial".equalsIgnoreCase(cfg.getInput())) {
+            try {
+                double serial = Double.parseDouble(date);
+                ZoneId zone = ZoneId.of("Asia/Kolkata");
+                return LocalDateTime.ofInstant(DateUtil.getJavaDate(serial).toInstant(), zone);
+            } catch (Exception ignore) { }
         }
+        if (cfg == null) return null;
+        String fmt = Optional.ofNullable(cfg.getFormat()).orElse("dd/MM/yyyy");
+        DateTimeFormatter df = DateTimeFormatter.ofPattern(fmt);
+        LocalDate d = (date == null || date.isBlank()) ? LocalDate.now() : LocalDate.parse(date.trim(), df);
+        LocalTime t = LocalTime.MIDNIGHT;
+        if (time != null && !time.isBlank()) {
+            String tfmt = Optional.ofNullable(cfg.getTimeFormat()).orElse("HH:mm:ss");
+            DateTimeFormatter tf = DateTimeFormatter.ofPattern(tfmt);
+            t = LocalTime.parse(time.trim(), tf);
+        }
+        return LocalDateTime.of(d, t);
     }
-    // -------------------------------------------------------------
 
     private static String norm(String s) {
         if (s == null) return "";
-        return s.replace("\u00A0", " ").trim().toLowerCase().replaceAll("\\s+", " ");
+        return s.replace('\u00A0', ' ').trim().toLowerCase().replaceAll("\\s+", " ");
     }
 
     private static boolean headerMatch(String col, String syn) {
@@ -807,6 +858,7 @@ public class ParserEngine {
             String reference,
             com.paytrix.cipherbank.infrastructure.config.parser.ParserConfig.PayInRule rule
     ) {
+        // default: credit if amount > 0
         if (amount == null) return false;
         if (rule == null || rule.getType() == null) {
             return amount.compareTo(java.math.BigDecimal.ZERO) > 0;
@@ -815,6 +867,7 @@ public class ParserEngine {
         String type = rule.getType();
         switch (type) {
             case "amountPositive":
+                return amount.compareTo(java.math.BigDecimal.ZERO) > 0;
             case "creditColumn":
                 return amount.compareTo(java.math.BigDecimal.ZERO) > 0;
             case "orderIdNoSpace":
@@ -837,5 +890,101 @@ public class ParserEngine {
             default:
                 return amount.compareTo(java.math.BigDecimal.ZERO) > 0;
         }
+    }
+
+    // ---------- Account number helpers (parserKey-aware) ----------
+
+    private static boolean isBlank(String s) { return s == null || s.trim().isEmpty(); }
+
+    /** Default cleanup: keep digits only. */
+    private static String cleanupAccount(String raw) {
+        if (raw == null) return null;
+        String cleaned = raw.replaceAll("\\D", "");
+        return cleaned.isBlank() ? null : cleaned;
+    }
+
+    private static AccountProfile profileFor(String parserKey) {
+        if (parserKey == null) return ACCOUNT_PROFILES.get("_default");
+        AccountProfile p = ACCOUNT_PROFILES.get(parserKey.toLowerCase());
+        return (p != null) ? p : ACCOUNT_PROFILES.get("_default");
+    }
+
+    /**
+     * Dynamic Excel account detection:
+     * 1) For first N rows (profile.headerSearchRows), find any cell matching a label synonym; then scan rightward for valuePattern.
+     * 2) Probe profile.likelyCols in those rows for a direct valuePattern match.
+     * 3) Broad scan first N rows for valuePattern (skip obvious non-account like IFSC/CIF by checking neighbors).
+     */
+    private static String detectAccountFromExcel(Sheet sheet, String parserKey) {
+        AccountProfile prof = profileFor(parserKey);
+        int maxRow = Math.min(sheet.getLastRowNum(), Math.max(20, prof.headerSearchRows));
+        Pattern digits = prof.valuePattern;
+
+        // Normalize synonyms to lowercase for contains() checks
+        List<String> syns = new ArrayList<>();
+        for (String s : prof.labelSynonyms) {
+            if (s != null && !s.isBlank()) syns.add(s.toLowerCase());
+        }
+
+        // pass 1: label → rightward scan
+        for (int r = 0; r <= maxRow; r++) {
+            Row row = sheet.getRow(r);
+            if (row == null) continue;
+            int lastCol = Math.max(0, row.getLastCellNum());
+
+            for (int c = 0; c < lastCol; c++) {
+                String v = getCellString(row.getCell(c));
+                if (v == null) continue;
+                String nv = norm(v);
+                for (String syn : syns) {
+                    if (!syn.isBlank() && (nv.contains(syn))) {
+                        // scan rightwards up to +25 cols
+                        for (int rc = c + 1; rc <= c + 25 && rc < Math.max(lastCol, 256); rc++) {
+                            String s = readCellOrMergedTopLeft(sheet, r, rc);
+                            if (s == null) continue;
+                            String onlyDigits = s.replaceAll("\\D", "");
+                            if (onlyDigits.length() >= 9) return onlyDigits;
+                            var m = digits.matcher(s);
+                            if (m.find()) return m.group();
+                        }
+                    }
+                }
+            }
+
+            // pass 2: likely columns direct
+            for (Integer cc : prof.likelyCols) {
+                if (cc == null || cc < 0) continue;
+                String s = readCellOrMergedTopLeft(sheet, r, cc);
+                if (s == null) continue;
+                String onlyDigits = s.replaceAll("\\D", "");
+                if (onlyDigits.length() >= 9) return onlyDigits;
+                var m = digits.matcher(s);
+                if (m.find()) return m.group();
+            }
+        }
+
+        // pass 3: broad scan first N rows for any big digit block (skip obvious non-account keys nearby)
+        Pattern nonAccountKeys = Pattern.compile("(?i)\\b(IFSC|CIF|Customer\\s*Id|GST|PAN|MICR)\\b");
+        for (int r = 0; r <= maxRow; r++) {
+            Row row = sheet.getRow(r);
+            if (row == null) continue;
+            int lastCol = Math.max(0, row.getLastCellNum());
+            for (int c = 0; c < lastCol; c++) {
+                String s = readCellOrMergedTopLeft(sheet, r, c);
+                if (s == null) continue;
+                var m = digits.matcher(s);
+                if (m.find()) {
+                    // quick neighbor key check (left cell often holds the label)
+                    String left = (c > 0) ? readCellOrMergedTopLeft(sheet, r, c - 1) : null;
+                    String right = readCellOrMergedTopLeft(sheet, r, c + 1);
+                    if ((left != null && nonAccountKeys.matcher(left).find()) ||
+                            (right != null && nonAccountKeys.matcher(right).find())) {
+                        continue; // likely not account
+                    }
+                    return m.group();
+                }
+            }
+        }
+        return null;
     }
 }

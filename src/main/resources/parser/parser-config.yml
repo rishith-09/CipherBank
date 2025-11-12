@@ -21,6 +21,7 @@ banks:
             credit:    ["credit","cr","deposit(cr)","deposit"]
             debit:     ["debit","dr","withdrawal(dr)","withdrawal"]
             balance:   ["balance","bal","balance(inr)"]
+            others:    ["Value Date","Instrument ID"]
       dateParse: { input: "excelSerial" }
       reference:
         splitter: "/"
@@ -40,7 +41,7 @@ banks:
         mode: "search"
         search:
           useOneBasedRowIndex: true
-          fixedHeaderRows: { from: 15, to: 27 }
+          fixedHeaderRows: { from: 25, to: 27 }
           multiRowCount: 3
           mergeSeparator: " "
           rowStartOffset: 1
@@ -50,6 +51,7 @@ banks:
             credit:    ["credit","cr","deposit(cr)","deposit"]
             debit:     ["debit","dr","withdrawal(dr)","withdrawal"]
             balance:   ["balance","bal","balance(inr)"]
+            others:    ["Value Date","Instrument ID"]
       dateParse: { input: "excelSerial" }
       reference:
         splitter: "/"
