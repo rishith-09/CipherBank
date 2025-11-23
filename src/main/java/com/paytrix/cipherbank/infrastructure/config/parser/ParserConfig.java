@@ -103,16 +103,27 @@ public class ParserConfig {
 
     @Data
     public static class Account {
-        private Boolean required;
-        private String source;          // excelCell | csvCell | textRegex
-        private Cell excelCell;
-        private Cell csvCell;
-        private String textRegex;
-        private String cleanupRegex;
+        private Boolean required;           // if true, account number is mandatory
+        private String source;              // "excelCell" | "csvCell" | "textRegex" | "request"
+        private ExcelCell excelCell;        // for Excel files (xlsx/xls)
+        private CsvCell csvCell;            // for CSV files (not commonly used)
+        private String textRegex;           // regex to extract from text
+        private String cleanupRegex;        // regex to cleanup extracted value (e.g., "\\D" to keep only digits)
+        private Boolean useOneBasedIndex;   // default true for Excel row/col indices
+        private Integer mergedColumnEnd;    // if account spans merged cells, specify end column
     }
 
     @Data
-    public static class Cell { private Integer row; private Integer col; }
+    public static class ExcelCell {
+        private Integer row;     // row number (1-based by default)
+        private Integer col;     // column number (1-based by default)
+    }
+
+    @Data
+    public static class CsvCell {
+        private Integer row;     // row number
+        private Integer col;     // column number
+    }
 
     @Data
     public static class DateParse {

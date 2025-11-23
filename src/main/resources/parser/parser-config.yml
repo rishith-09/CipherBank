@@ -1,12 +1,23 @@
 banks:
+  # KGB Bank (Kerala Gramin Bank) - Already configured
   kgb:
     parserKey: "kgb"
     timezone: "Asia/Kolkata"
 
-    xlsx:
+    xls:
       sheetIndex: "0"
       numeric: { decimalSeparator: ".", thousandsSeparator: "," }
-      account: { required: false, source: "excelCell", excelCell: { row: 1, col: 1 }, cleanupRegex: "\\D" }
+
+      # Account number extraction from XLS file
+      account:
+        required: false              # not mandatory if provided in request
+        source: "excelCell"          # extract from specific Excel cell
+        excelCell:
+          row: 5                     # Row 5 (1-based index) - "Number: 40130111000733"
+          col: 11                    # Column 11 (K) contains the account number
+        cleanupRegex: "\\D"          # Remove all non-digits
+        useOneBasedIndex: true       # Use Excel-style 1-based row/column indexing
+
       headers:
         mode: "search"
         search:
@@ -16,27 +27,39 @@ banks:
           mergeSeparator: " "
           rowStartOffset: 1                      # data starts one row after row 27
           expect:
-            date:      ["txn date","transaction date","date"]
+            date:      ["date", "txn date","transaction date"]
             reference: ["narration","description","particulars"]
-            credit:    ["credit","cr","deposit(cr)","deposit"]
-            debit:     ["debit","dr","withdrawal(dr)","withdrawal"]
+            credit:    ["deposit","credit","cr","deposit(cr)"]
+            debit:     ["withdrawal","debit","dr","withdrawal(dr)"]
             balance:   ["balance","bal","balance(inr)"]
-            others:    ["Value Date","Instrument ID"]
-      dateParse: { input: "excelSerial" }
+
+      dateParse: { input: "string", format: "dd/MM/yyyy" }
+
       reference:
         splitter: "/"
-        partsCount: { mode: "oneOf", values: [5,7,12] }
-        orderId: { index: 6, trimNbsp: true }
-        utr: { index: 2, cleanDigitsOnly: true }
+        partsCount: { mode: "oneOf", values: [5,6,7] }
+        orderId: { index: 4, trimNbsp: true }
+        utr: { index: 1, cleanDigitsOnly: true }
         utrFallback: { when: "missingOrNonNumeric", regex: "\\b[0-9A-Z]{12,}\\b" }
+
       payInRule: { type: "creditColumn" }
       rowStop: { mode: "blankRows" }
       output: { includeFinalBalance: true, computeTypeFrom: "orderId" }
 
-    xls:
+    xlsx:
       sheetIndex: "0"
       numeric: { decimalSeparator: ".", thousandsSeparator: "," }
-      account: { required: false, source: "excelCell", excelCell: { row: 1, col: 1 }, cleanupRegex: "\\D" }
+
+      # Account number extraction from XLSX file (same as XLS)
+      account:
+        required: false
+        source: "excelCell"
+        excelCell:
+          row: 5
+          col: 11
+        cleanupRegex: "\\D"
+        useOneBasedIndex: true
+
       headers:
         mode: "search"
         search:
@@ -46,19 +69,150 @@ banks:
           mergeSeparator: " "
           rowStartOffset: 1
           expect:
-            date:      ["txn date","transaction date","date"]
+            date:      ["date", "txn date","transaction date"]
             reference: ["narration","description","particulars"]
-            credit:    ["credit","cr","deposit(cr)","deposit"]
-            debit:     ["debit","dr","withdrawal(dr)","withdrawal"]
+            credit:    ["deposit","credit","cr","deposit(cr)"]
+            debit:     ["withdrawal","debit","dr","withdrawal(dr)"]
             balance:   ["balance","bal","balance(inr)"]
-            others:    ["Value Date","Instrument ID"]
+
       dateParse: { input: "excelSerial" }
+
       reference:
         splitter: "/"
-        partsCount: { mode: "oneOf", values: [5,7,12] }
-        orderId: { index: 6, trimNbsp: true }
-        utr: { index: 2, cleanDigitsOnly: true }
+        partsCount: { mode: "oneOf", values: [5,6,7] }
+        orderId: { index: 4, trimNbsp: true }
+        utr: { index: 1, cleanDigitsOnly: true }
         utrFallback: { when: "missingOrNonNumeric", regex: "\\b[0-9A-Z]{12,}\\b" }
+
+      payInRule: { type: "creditColumn" }
+      rowStop: { mode: "blankRows" }
+      output: { includeFinalBalance: true, computeTypeFrom: "orderId" }
+
+  # IOB Bank (Indian Overseas Bank) - CSV format
+  iob:
+    parserKey: "iob"
+    timezone: "Asia/Kolkata"
+
+    csv:
+      # Account number NOT in CSV file - must be provided in request
+      account:
+        required: true               # account number is mandatory
+        source: "request"            # must be provided in API request
+
+      headers:
+        mode: "fixed"
+        fixed:
+          rowStart: 1                # data starts at row 1 (after header row 0)
+          columns:
+            date: 0                  # Date column (index 0)
+            reference: 3             # Narration column (index 3)
+            debit: 5                 # Debit column (index 5)
+            credit: 6                # Credit column (index 6)
+            balance: 7               # Balance column (index 7)
+
+      csv:
+        delimiter: ","
+        charset: "UTF-8"
+        skipRows: 0
+
+      numeric: { decimalSeparator: ".", thousandsSeparator: "," }
+
+      dateParse: { input: "string", format: "dd-MMM-yyyy" }  # 21-Nov-2025
+
+      reference:
+        splitter: "/"
+        partsCount: { mode: "oneOf", values: [4,5,6,7] }
+        orderId: { index: 4, trimNbsp: true }               # UPI reference at end
+        utr: { index: 1, cleanDigitsOnly: true }            # 12-digit number after UPI/
+        utrFallback: { when: "missingOrNonNumeric", regex: "\\b\\d{12}\\b" }
+
+      payInRule: { type: "creditColumn" }
+      rowStop: { mode: "none" }
+      output: { includeFinalBalance: false, computeTypeFrom: "orderId" }
+
+  # Indian Bank - XLSX format
+  indianbank:
+    parserKey: "indianbank"
+    timezone: "Asia/Kolkata"
+
+    xlsx:
+      sheetIndex: "0"
+      numeric: { decimalSeparator: ".", thousandsSeparator: "," }
+
+      # Account number extraction from Indian Bank XLSX file
+      account:
+        required: false              # not mandatory if provided in request
+        source: "excelCell"          # extract from specific Excel cell
+        excelCell:
+          row: 18                    # Row 18 (1-based) - "Account Number: 8166120231"
+          col: 4                     # Column 4 (D) contains the account number
+        cleanupRegex: "\\D"          # Remove all non-digits
+        useOneBasedIndex: true       # Use Excel-style 1-based indexing
+
+      headers:
+        mode: "search"
+        search:
+          useOneBasedRowIndex: true
+          scanRange: { from: 30, to: 40 }  # Look for header in this range
+          multiRowCount: 1                  # Single row header
+          rowStartOffset: 1                 # Data starts one row after header
+          expect:
+            date:      ["date"]
+            reference: ["transaction details", "particulars", "description"]
+            debit:     ["debits", "debit", "dr"]
+            credit:    ["credits", "credit", "cr"]
+            balance:   ["balance", "bal"]
+
+      dateParse: { input: "string", format: "dd MMM yyyy" }  # 21 Nov 2025
+
+      reference:
+        splitter: "/"
+        partsCount: { mode: "oneOf", values: [3,4,5,6] }
+        orderId: { index: 3, trimNbsp: true }               # Last part after /
+        utr: { index: 1, cleanDigitsOnly: true }            # Second part (IFSC code area)
+        utrFallback: { when: "missingOrNonNumeric", regex: "\\b[A-Z]{4}\\d{7}\\b" }
+
+      payInRule: { type: "creditColumn" }
+      rowStop: { mode: "blankRows" }
+      output: { includeFinalBalance: true, computeTypeFrom: "orderId" }
+
+    xls:
+      sheetIndex: "0"
+      numeric: { decimalSeparator: ".", thousandsSeparator: "," }
+
+      # Account number extraction from Indian Bank XLS file
+      account:
+        required: false
+        source: "excelCell"
+        excelCell:
+          row: 18
+          col: 4
+        cleanupRegex: "\\D"
+        useOneBasedIndex: true
+
+      headers:
+        mode: "search"
+        search:
+          useOneBasedRowIndex: true
+          scanRange: { from: 30, to: 40 }
+          multiRowCount: 1
+          rowStartOffset: 1
+          expect:
+            date:      ["date"]
+            reference: ["transaction details", "particulars", "description"]
+            debit:     ["debits", "debit", "dr"]
+            credit:    ["credits", "credit", "cr"]
+            balance:   ["balance", "bal"]
+
+      dateParse: { input: "string", format: "dd MMM yyyy" }
+
+      reference:
+        splitter: "/"
+        partsCount: { mode: "oneOf", values: [3,4,5,6] }
+        orderId: { index: 3, trimNbsp: true }
+        utr: { index: 1, cleanDigitsOnly: true }
+        utrFallback: { when: "missingOrNonNumeric", regex: "\\b[A-Z]{4}\\d{7}\\b" }
+
       payInRule: { type: "creditColumn" }
       rowStop: { mode: "blankRows" }
       output: { includeFinalBalance: true, computeTypeFrom: "orderId" }

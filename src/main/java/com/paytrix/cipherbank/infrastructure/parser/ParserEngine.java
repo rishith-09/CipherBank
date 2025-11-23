@@ -51,53 +51,6 @@ public class ParserEngine {
         }
     }
 
-    /** Account detection profile per parserKey (bank). */
-    private static final class AccountProfile {
-        final List<String> labelSynonyms;  // e.g., "account no", "a/c no", "number"
-        final int headerSearchRows;        // scan early rows only
-        final List<Integer> likelyCols;    // zero-based probable columns to probe (e.g., L..N)
-        final Pattern valuePattern;        // digits length rule
-        AccountProfile(List<String> labelSynonyms, int headerSearchRows, List<Integer> likelyCols, Pattern valuePattern) {
-            this.labelSynonyms = labelSynonyms;
-            this.headerSearchRows = headerSearchRows;
-            this.likelyCols = likelyCols;
-            this.valuePattern = valuePattern;
-        }
-    }
-
-    /** Registry of parserKey → AccountProfile, with a DEFAULT. */
-    private static final Map<String, AccountProfile> ACCOUNT_PROFILES;
-    static {
-        Pattern defaultDigits = Pattern.compile("\\b\\d{9,20}\\b");
-
-        AccountProfile DEFAULT = new AccountProfile(
-                Arrays.asList(
-                        "account no", "account number", "a/c no", "a/c number",
-                        "acc no", "acc number", "number", "no.", "ac no", "ac number"
-                ),
-                80,                       // scan first 80 rows
-                Arrays.asList(10,11,12,13,14), // likely columns around K..O (0-based)
-                defaultDigits
-        );
-
-        AccountProfile KGB = new AccountProfile(
-                Arrays.asList(
-                        "number", "account no", "account number", "a/c no", "a/c number"
-                ),
-                80,
-                Arrays.asList(11,12,13),  // L..N are common in your samples
-                defaultDigits
-        );
-
-        Map<String, AccountProfile> map = new HashMap<>();
-        map.put("_default", DEFAULT);
-        map.put("kgb", KGB);
-        // Add more banks here as needed:
-        // map.put("sbi", new AccountProfile(...));
-        // map.put("federal", new AccountProfile(...));
-        ACCOUNT_PROFILES = Collections.unmodifiableMap(map);
-    }
-
     public static FileKind detectKind(String filename, String contentType) {
         String name = Optional.ofNullable(filename).orElse("").toLowerCase();
         if (name.endsWith(".csv")) return FileKind.CSV;
@@ -120,18 +73,115 @@ public class ParserEngine {
 
         FileKind kind = detectKind(filename, contentType);
         return switch (kind) {
-            case CSV  -> parseCsv(in, bankCfg.getCsv(), accountNoOverride);
+            case CSV  -> parseCsv(in, bankCfg.getCsv(), accountNoOverride, bankCfg.getParserKey());
             case XLSX -> parseExcel(in, bankCfg.getXlsx(), accountNoOverride, bankCfg.getParserKey());
             case XLS  -> parseExcel(in, bankCfg.getXls(),  accountNoOverride, bankCfg.getParserKey());
             case PDF  -> parsePdf(in, bankCfg.getPdf(), accountNoOverride);
         };
     }
 
+    // ================= ACCOUNT NUMBER EXTRACTION =================
+
+    /**
+     * Extract account number from Excel file based on configuration
+     */
+    private static String extractAccountFromExcel(Sheet sheet, ParserConfig.Account accountCfg) {
+        if (accountCfg == null || !"excelCell".equalsIgnoreCase(accountCfg.getSource())) {
+            return null;
+        }
+
+        ParserConfig.ExcelCell cellCfg = accountCfg.getExcelCell();
+        if (cellCfg == null || cellCfg.getRow() == null || cellCfg.getCol() == null) {
+            return null;
+        }
+
+        // Check if using 1-based indexing (default true)
+        boolean oneBased = Optional.ofNullable(accountCfg.getUseOneBasedIndex()).orElse(true);
+        int rowIdx = oneBased ? cellCfg.getRow() - 1 : cellCfg.getRow();
+        int colIdx = oneBased ? cellCfg.getCol() - 1 : cellCfg.getCol();
+
+        // Handle merged cells if specified
+        Integer mergedEndCol = accountCfg.getMergedColumnEnd();
+        if (mergedEndCol != null) {
+            int endColIdx = oneBased ? mergedEndCol - 1 : mergedEndCol;
+            return extractFromMergedExcelCells(sheet, rowIdx, colIdx, endColIdx, accountCfg.getCleanupRegex());
+        }
+
+        // Single cell extraction
+        Row row = sheet.getRow(rowIdx);
+        if (row == null) return null;
+
+        Cell cell = row.getCell(colIdx);
+        String value = getCellString(cell);
+
+        return cleanupAccount(value, accountCfg.getCleanupRegex());
+    }
+
+    /**
+     * Extract account number from merged cells in Excel
+     */
+    private static String extractFromMergedExcelCells(Sheet sheet, int rowIdx, int startCol, int endCol, String cleanupRegex) {
+        Row row = sheet.getRow(rowIdx);
+        if (row == null) return null;
+
+        StringBuilder sb = new StringBuilder();
+        for (int colIdx = startCol; colIdx <= endCol; colIdx++) {
+            Cell cell = row.getCell(colIdx);
+            String val = getCellString(cell);
+            if (val != null && !val.trim().isEmpty()) {
+                if (sb.length() > 0) sb.append(" ");
+                sb.append(val.trim());
+            }
+        }
+
+        return cleanupAccount(sb.toString(), cleanupRegex);
+    }
+
+    /**
+     * Extract account number from CSV file based on configuration
+     */
+    private static String extractAccountFromCsv(List<CSVRecord> records, ParserConfig.Account accountCfg) {
+        if (accountCfg == null || !"csvCell".equalsIgnoreCase(accountCfg.getSource())) {
+            return null;
+        }
+
+        ParserConfig.CsvCell cellCfg = accountCfg.getCsvCell();
+        if (cellCfg == null || cellCfg.getRow() == null || cellCfg.getCol() == null) {
+            return null;
+        }
+
+        int rowIdx = cellCfg.getRow();
+        int colIdx = cellCfg.getCol();
+
+        if (rowIdx >= records.size()) return null;
+
+        CSVRecord record = records.get(rowIdx);
+        if (colIdx >= record.size()) return null;
+
+        String value = record.get(colIdx);
+        return cleanupAccount(value, accountCfg.getCleanupRegex());
+    }
+
+    /**
+     * Cleanup account number based on regex pattern
+     */
+    private static String cleanupAccount(String raw, String cleanupRegex) {
+        if (raw == null || raw.trim().isEmpty()) return null;
+
+        String cleaned = raw.trim();
+
+        // Apply cleanup regex if provided (e.g., "\\D" to keep only digits)
+        if (cleanupRegex != null && !cleanupRegex.isEmpty()) {
+            cleaned = cleaned.replaceAll(cleanupRegex, "");
+        }
+
+        return cleaned.isEmpty() ? null : cleaned;
+    }
+
     // ================= CSV =================
     private static List<ParsedRow> parseCsv(InputStream in, ParserConfig.FileTypeConfig cfg,
-                                            String accountNoOverride) throws IOException {
+                                            String accountNoOverride, String parserKey) throws IOException {
         var rows = new ArrayList<ParsedRow>();
-        String accNo = cleanupAccount(accountNoOverride); // CSV heuristic not implemented; use override if present
 
         Charset cs = Charset.forName(Optional.ofNullable(cfg.getCsv()).map(ParserConfig.Csv::getCharset).orElse("UTF-8"));
         char delim = Optional.ofNullable(cfg.getCsv()).map(c -> c.getDelimiter() != null ? c.getDelimiter().charAt(0) : ',').orElse(',');
@@ -141,6 +191,17 @@ public class ParserEngine {
             CSVFormat format = CSVFormat.DEFAULT.builder().setDelimiter(delim).setTrim(true).build();
             CSVParser parser = new CSVParser(r, format);
             List<CSVRecord> all = parser.getRecords();
+
+            // Extract account number from CSV if configured
+            String accountNo = accountNoOverride;
+            if (isBlank(accountNo) && cfg.getAccount() != null) {
+                accountNo = extractAccountFromCsv(all, cfg.getAccount());
+            }
+
+            // If account is required and still not found, throw exception
+            if (Boolean.TRUE.equals(cfg.getAccount() != null && cfg.getAccount().getRequired()) && isBlank(accountNo)) {
+                throw new IllegalStateException("Account number is required but not found in CSV");
+            }
 
             Map<String,Integer> idx;
             int startRow;
@@ -185,7 +246,7 @@ public class ParserEngine {
                         continue;
                     }
                     var rec = all.get(i);
-                    var pr = mapCsvRecord(rec, idx, cfg, accNo);
+                    var pr = mapCsvRecord(rec, idx, cfg, accountNo);
                     if (pr != null) rows.add(pr);
                 }
                 return rows;
@@ -197,7 +258,7 @@ public class ParserEngine {
 
             for (int i = Math.max(skip, startRow); i < all.size(); i++) {
                 var rec = all.get(i);
-                var pr = mapCsvRecord(rec, idx, cfg, accNo);
+                var pr = mapCsvRecord(rec, idx, cfg, accountNo);
                 if (pr != null) rows.add(pr);
             }
         }
@@ -256,10 +317,15 @@ public class ParserEngine {
             int sheetIdx = Integer.parseInt(Optional.ofNullable(cfg.getSheetIndex()).orElse("0"));
             Sheet sheet = wb.getSheetAt(sheetIdx);
 
-            // Detect account number if not provided
-            String accountNo = cleanupAccount(accountNoOverride);
-            if (isBlank(accountNo)) {
-                accountNo = detectAccountFromExcel(sheet, parserKey); // parserKey-aware
+            // Extract account number from Excel if configured
+            String accountNo = accountNoOverride;
+            if (isBlank(accountNo) && cfg.getAccount() != null) {
+                accountNo = extractAccountFromExcel(sheet, cfg.getAccount());
+            }
+
+            // If account is required and still not found, throw exception
+            if (Boolean.TRUE.equals(cfg.getAccount() != null && cfg.getAccount().getRequired()) && isBlank(accountNo)) {
+                throw new IllegalStateException("Account number is required but not found in Excel file");
             }
 
             Map<String,Integer> idx;
@@ -660,7 +726,7 @@ public class ParserEngine {
     private static List<ParsedRow> parsePdf(InputStream in, ParserConfig.PdfConfig cfg,
                                             String accountNoOverride) throws IOException {
         var rows = new ArrayList<ParsedRow>();
-        String accountNo = cleanupAccount(accountNoOverride); // override if present
+        String accountNo = cleanupAccount(accountNoOverride, null); // override if present
 
         try (PDDocument doc = PDDocument.load(in)) {
             var stripper = new PDFTextStripper();
@@ -892,99 +958,5 @@ public class ParserEngine {
         }
     }
 
-    // ---------- Account number helpers (parserKey-aware) ----------
-
     private static boolean isBlank(String s) { return s == null || s.trim().isEmpty(); }
-
-    /** Default cleanup: keep digits only. */
-    private static String cleanupAccount(String raw) {
-        if (raw == null) return null;
-        String cleaned = raw.replaceAll("\\D", "");
-        return cleaned.isBlank() ? null : cleaned;
-    }
-
-    private static AccountProfile profileFor(String parserKey) {
-        if (parserKey == null) return ACCOUNT_PROFILES.get("_default");
-        AccountProfile p = ACCOUNT_PROFILES.get(parserKey.toLowerCase());
-        return (p != null) ? p : ACCOUNT_PROFILES.get("_default");
-    }
-
-    /**
-     * Dynamic Excel account detection:
-     * 1) For first N rows (profile.headerSearchRows), find any cell matching a label synonym; then scan rightward for valuePattern.
-     * 2) Probe profile.likelyCols in those rows for a direct valuePattern match.
-     * 3) Broad scan first N rows for valuePattern (skip obvious non-account like IFSC/CIF by checking neighbors).
-     */
-    private static String detectAccountFromExcel(Sheet sheet, String parserKey) {
-        AccountProfile prof = profileFor(parserKey);
-        int maxRow = Math.min(sheet.getLastRowNum(), Math.max(20, prof.headerSearchRows));
-        Pattern digits = prof.valuePattern;
-
-        // Normalize synonyms to lowercase for contains() checks
-        List<String> syns = new ArrayList<>();
-        for (String s : prof.labelSynonyms) {
-            if (s != null && !s.isBlank()) syns.add(s.toLowerCase());
-        }
-
-        // pass 1: label → rightward scan
-        for (int r = 0; r <= maxRow; r++) {
-            Row row = sheet.getRow(r);
-            if (row == null) continue;
-            int lastCol = Math.max(0, row.getLastCellNum());
-
-            for (int c = 0; c < lastCol; c++) {
-                String v = getCellString(row.getCell(c));
-                if (v == null) continue;
-                String nv = norm(v);
-                for (String syn : syns) {
-                    if (!syn.isBlank() && (nv.contains(syn))) {
-                        // scan rightwards up to +25 cols
-                        for (int rc = c + 1; rc <= c + 25 && rc < Math.max(lastCol, 256); rc++) {
-                            String s = readCellOrMergedTopLeft(sheet, r, rc);
-                            if (s == null) continue;
-                            String onlyDigits = s.replaceAll("\\D", "");
-                            if (onlyDigits.length() >= 9) return onlyDigits;
-                            var m = digits.matcher(s);
-                            if (m.find()) return m.group();
-                        }
-                    }
-                }
-            }
-
-            // pass 2: likely columns direct
-            for (Integer cc : prof.likelyCols) {
-                if (cc == null || cc < 0) continue;
-                String s = readCellOrMergedTopLeft(sheet, r, cc);
-                if (s == null) continue;
-                String onlyDigits = s.replaceAll("\\D", "");
-                if (onlyDigits.length() >= 9) return onlyDigits;
-                var m = digits.matcher(s);
-                if (m.find()) return m.group();
-            }
-        }
-
-        // pass 3: broad scan first N rows for any big digit block (skip obvious non-account keys nearby)
-        Pattern nonAccountKeys = Pattern.compile("(?i)\\b(IFSC|CIF|Customer\\s*Id|GST|PAN|MICR)\\b");
-        for (int r = 0; r <= maxRow; r++) {
-            Row row = sheet.getRow(r);
-            if (row == null) continue;
-            int lastCol = Math.max(0, row.getLastCellNum());
-            for (int c = 0; c < lastCol; c++) {
-                String s = readCellOrMergedTopLeft(sheet, r, c);
-                if (s == null) continue;
-                var m = digits.matcher(s);
-                if (m.find()) {
-                    // quick neighbor key check (left cell often holds the label)
-                    String left = (c > 0) ? readCellOrMergedTopLeft(sheet, r, c - 1) : null;
-                    String right = readCellOrMergedTopLeft(sheet, r, c + 1);
-                    if ((left != null && nonAccountKeys.matcher(left).find()) ||
-                            (right != null && nonAccountKeys.matcher(right).find())) {
-                        continue; // likely not account
-                    }
-                    return m.group();
-                }
-            }
-        }
-        return null;
-    }
 }
