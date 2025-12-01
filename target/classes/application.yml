@@ -1,0 +1,34 @@
+spring:
+  application:
+    name: cipherbank
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql:/paytrix-db.c7as80ggu1ks.ap-south-1.rds.amazonaws.com/cipherbank&serverTimezone=UTC&allowPublicKeyRetrieval=true
+    username: admin
+    password: password
+  jpa:
+    show-sql: true
+    hibernate:
+      ddl-auto: update
+      naming:
+        physical-strategy: org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+
+springdoc:
+  api-docs:
+    enabled: true
+
+jwt:
+  secret: secret-key1234-secret-key1234-admin   # 32+ chars for HS256
+  encryption-secret: 3f7a9c1d2b4e5f8091a2b3c4d5e6f701   # 128 bits encryption key
+  expiration: 900000  # 15 minutes in milliseconds
+
+logging:
+  level:
+    root: INFO
+    #    org.springframework.security: DEBUG        # show Spring Security logs
+    #    org.springframework.web: DEBUG             # show request mappings and endpoints
+    org.hibernate.SQL: DEBUG                   # show SQL queries
+#    org.hibernate.type.descriptor.sql.BasicBinder: TRACE # show SQL parameter bindings
