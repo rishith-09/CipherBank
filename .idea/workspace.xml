@@ -6,9 +6,7 @@
   <component name="ChangeListManager">
     <list default="true" id="8d3fb3d5-bc61-4b66-a687-03d27b377660" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/target/classes/com/paytrix/cipherbank/infrastructure/config/SecurityConfig.class" beforeDir="false" afterPath="$PROJECT_DIR$/target/classes/com/paytrix/cipherbank/infrastructure/config/SecurityConfig.class" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/target/paymentgateway-0.0.1-SNAPSHOT.jar" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/target/paymentgateway-0.0.1-SNAPSHOT.jar.original" beforeDir="false" afterPath="$PROJECT_DIR$/target/paymentgateway-0.0.1-SNAPSHOT.jar.original" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/paytrix/cipherbank/infrastructure/adapter/out/persistence/repository/JpaIpWhitelistRepository.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/paytrix/cipherbank/infrastructure/adapter/out/persistence/repository/JpaIpWhitelistRepository.java" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
