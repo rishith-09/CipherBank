@@ -35,11 +35,21 @@ public class AuthController {
     private PasswordEncoder passwordEncoder;
 
     @PostMapping("/login")
-    public ResponseEntity<?> login(@RequestBody @Valid AuthRequest request) {
+    public ResponseEntity<?> login(@RequestBody LoginRequest request) {
+        // ... authentication logic ...
 
-        String token = authService.login(request.username(), request.password());
+        String token = jwtTokenUtil.generateTokenFromUser(user);
 
-        return ResponseEntity.ok(new AuthResponse(token));
+        List<String> roles = user.getRoles().stream()
+                .map(Role::getName)
+                .collect(Collectors.toList());
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("token", token);
+        response.put("username", user.getUsername());
+        response.put("roles", roles);
+
+        return ResponseEntity.ok(response);
     }
 
     @PostMapping("/register")
@@ -52,6 +62,22 @@ public class AuthController {
                 user.getUsername(),
                 user.getRoles().stream().map(Role::getName).collect(Collectors.toList())
         );
+
+        return ResponseEntity.ok(response);
+    }
+    @GetMapping("/me")
+    public ResponseEntity<?> getCurrentUser(Authentication authentication) {
+        String username = authentication.getName();
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        List<String> roles = user.getRoles().stream()
+                .map(Role::getName)
+                .collect(Collectors.toList());
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("username", username);
+        response.put("roles", roles);
 
         return ResponseEntity.ok(response);
     }
