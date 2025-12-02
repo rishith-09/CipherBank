@@ -3,7 +3,7 @@ spring:
     name: cipherbank
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql:/paytrix-db.c7as80ggu1ks.ap-south-1.rds.amazonaws.com/cipherbank&serverTimezone=UTC&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://paytrix-db.c7as80ggu1ks.ap-south-1.rds.amazonaws.com/cipherbank?serverTimezone=UTC&allowPublicKeyRetrieval=true
     username: admin
     password: password
   jpa:

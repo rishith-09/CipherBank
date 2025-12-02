@@ -46,7 +46,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/login").permitAll()
                         .requestMatchers("/api/auth/register").hasRole("ADMIN")  // Only admins can register users
                         .requestMatchers("/api/auth/change-password").authenticated()  // Any authenticated user
-                        .requestMatchers("/api/statements/**").permitAll()
+                        .requestMatchers("/api/statements/**").authenticated()
 
                         .anyRequest().authenticated()
                 );
