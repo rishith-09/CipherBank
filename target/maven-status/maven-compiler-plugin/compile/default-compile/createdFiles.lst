@@ -32,6 +32,7 @@ com\paytrix\cipherbank\application\port\out\IpWhitelistRepositoryPort.class
 com\paytrix\cipherbank\infrastructure\adapter\out\persistence\repository\JpaBankStatementUploadRepository.class
 com\paytrix\cipherbank\infrastructure\adapter\in\controller\AuthRequest.class
 com\paytrix\cipherbank\infrastructure\adapter\out\persistence\adapter\BankProfileRepositoryAdapter.class
+com\cipherbank\config\CorsConfig.class
 com\paytrix\cipherbank\infrastructure\config\SecurityConfig.class
 com\paytrix\cipherbank\application\port\out\BankStatementUploadRepositoryPort.class
 com\paytrix\cipherbank\infrastructure\parser\ParserEngine.class
