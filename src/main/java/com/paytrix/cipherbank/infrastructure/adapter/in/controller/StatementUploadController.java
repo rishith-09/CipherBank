@@ -23,7 +23,7 @@ public class StatementUploadController {
     }
 
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-//    @PreAuthorize("hasAnyRole('ADMIN','USER')")
+    @PreAuthorize("hasAnyRole('ADMIN','USER','ROLE_ADMIN','ROLE_USER')")
     public ResponseEntity<StatementUploadUseCase.UploadResult> upload(
             @RequestParam("parserKey") @NotBlank String parserKey,
             @RequestParam("username")  @NotBlank String username,
