@@ -1,0 +1,65 @@
+spring:
+  application:
+    name: cipherbank
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    # Update with your RDS or EC2 MySQL endpoint
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:cipherbank}?useSSL=true&serverTimezone=UTC
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:root@123}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+  jpa:
+    show-sql: false  # Disable in production
+    hibernate:
+      ddl-auto: validate  # Use 'validate' or 'none' in production
+      naming:
+        physical-strategy: org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        format_sql: false
+        use_sql_comments: false
+
+springdoc:
+  api-docs:
+    enabled: true
+
+jwt:
+  secret: ${JWT_SECRET:secret-key1234-secret-key1234-admin}
+  encryption-secret: ${JWT_ENCRYPTION_SECRET:3f7a9c1d2b4e5f8091a2b3c4d5e6f701}
+  expiration: ${JWT_EXPIRATION:900000}
+
+# IP Whitelist Security Configuration
+security:
+  ip-whitelist:
+    enabled: ${IP_WHITELIST_ENABLED:true}
+    debug: ${IP_WHITELIST_DEBUG:false}  # Set to true temporarily to debug IP issues
+
+# Server configuration
+server:
+  port: ${SERVER_PORT:8080}
+  compression:
+    enabled: true
+  tomcat:
+    max-threads: 200
+    min-spare-threads: 10
+
+logging:
+  level:
+    root: WARN
+    org.springframework.web: INFO
+    org.hibernate.SQL: WARN
+    com.paytrix.cipherbank: INFO
+    com.paytrix.cipherbank.infrastructure.security.IpWhitelistFilter: INFO
+    com.paytrix.cipherbank.infrastructure.util.IpAddressUtil: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %logger{36} - %msg%n"
+  file:
+    name: /var/log/cipherbank/application.log
+    max-size: 10MB
+    max-history: 30

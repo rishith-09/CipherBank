@@ -5,13 +5,13 @@ spring:
   # Database Configuration
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://paytrix-db.c7as80ggu1ks.ap-south-1.rds.amazonaws.com/cipherbank?serverTimezone=UTC&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://localhost:3306/cipherbank?serverTimezone=UTC&allowPublicKeyRetrieval=true
     username: admin
     password: password
 
   # JPA/Hibernate Configuration
   jpa:
-    show-sql: true
+    show-sql: false
     hibernate:
       ddl-auto: update
       naming:
@@ -40,13 +40,19 @@ jwt:
   encryption-secret: 3f7a9c1d2b4e5f8091a2b3c4d5e6f701   # 128 bits encryption key
   expiration: 900000  # 15 minutes in milliseconds
 
-# Logging Configuration
+# IP Whitelist Security Configuration
+security:
+  ip-whitelist:
+    enabled: true      # Set to false to disable IP whitelist filtering
+    debug: false       # Set to true to see detailed IP extraction logs (useful for debugging proxy issues)
+
 logging:
   level:
     root: INFO
-    # Uncomment for debugging
-    # org.springframework.security: DEBUG        # Show Spring Security logs
-    # org.springframework.web: DEBUG             # Show request mappings
-    org.hibernate.SQL: DEBUG                     # Show SQL queries
-    # org.hibernate.type.descriptor.sql.BasicBinder: TRACE # Show SQL parameters
     com.paytrix.cipherbank: INFO                 # Application logs
+    #    org.springframework.security: DEBUG        # show Spring Security logs
+    #    org.springframework.web: DEBUG             # show request mappings and endpoints
+    org.hibernate.SQL: DEBUG                   # show SQL queries
+    #    org.hibernate.type.descriptor.sql.BasicBinder: TRACE # show SQL parameter bindings
+    com.paytrix.cipherbank.infrastructure.security.IpWhitelistFilter: INFO  # IP whitelist logs
+    com.paytrix.cipherbank.infrastructure.util.IpAddressUtil: DEBUG  # IP extraction logs
