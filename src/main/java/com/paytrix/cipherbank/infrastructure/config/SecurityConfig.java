@@ -36,6 +36,8 @@ public class SecurityConfig {
                 .cors(cors -> {})  // ← ADD THIS LINE HERE
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // Actuator endpoints (health checks, monitoring)
+                        .requestMatchers("/actuator/**").permitAll()
                         // Swagger & API docs (if using)
                         .requestMatchers(
                                 "/swagger-ui.html", "/swagger-ui/**",
@@ -43,6 +45,7 @@ public class SecurityConfig {
                         ).permitAll()
 
                         // auth endpoints
+
                         .requestMatchers("/api/auth/login").permitAll()
                         .requestMatchers("/api/auth/register").hasRole("ADMIN")  // Only admins can register users
                         .requestMatchers("/api/auth/change-password").authenticated()  // Any authenticated user
