@@ -6,7 +6,7 @@ spring:
     # Update with your RDS or EC2 MySQL endpoint
     url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:cipherbank}?useSSL=true&serverTimezone=UTC
     username: ${DB_USERNAME:root}
-    password: ${DB_PASSWORD:root@123}
+    password: ${DB_PASSWORD:password}
     hikari:
       maximum-pool-size: 10
       minimum-idle: 5
@@ -38,7 +38,7 @@ jwt:
 security:
   ip-whitelist:
     enabled: ${IP_WHITELIST_ENABLED:true}
-    debug: ${IP_WHITELIST_DEBUG:false}  # Set to true temporarily to debug IP issues
+    debug: ${IP_WHITELIST_DEBUG:true}  # Set to true temporarily to debug IP issues
 
 # Server configuration
 server:
