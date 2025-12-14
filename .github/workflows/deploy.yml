@@ -2,17 +2,17 @@ name: CipherBank Backend - Blue/Green Deploy
 
 on:
   push:
-    branches: [ main ]
+    branches: [ release ]  # ← CHANGED: From 'main' to 'release'
     paths:
       - 'src/**'
       - 'pom.xml'
-      - '.github/workflows/cipherbank-backend-deploy.yml'
+      - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
 env:
   APP_NAME: cipherbank
-  BLUE_PORT: 8082
-  GREEN_PORT: 8083
+  BLUE_PORT: 8083
+  GREEN_PORT: 8084
   HEALTH_ENDPOINT: /actuator/health
   TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
   TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -129,13 +129,13 @@ jobs:
         run: |
           scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             ${{ steps.build.outputs.jar_file }} \
-            ${{ env.SSH_USER }}@${{ env.SSH_HOST }}:/home/claude/${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }}/app.jar
+            ${{ env.SSH_USER }}@${{ env.SSH_HOST }}:/home/bugsandfeaturesco/${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }}/app.jar
       
       - name: 📤 Upload Environment File
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             ${{ env.SSH_USER }}@${{ env.SSH_HOST }} << 'ENDSSH'
-            cat > /home/claude/${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }}/.env << 'EOF'
+            cat > /home/bugsandfeaturesco/${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }}/.env << 'EOF'
           SERVER_PORT=${{ steps.detect_color.outputs.deploy_port }}
           SPRING_PROFILES_ACTIVE=prod
           DB_HOST=${{ secrets.DB_HOST }}
@@ -143,9 +143,6 @@ jobs:
           DB_NAME=${{ secrets.DB_NAME }}
           DB_USERNAME=${{ secrets.DB_USERNAME }}
           DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-          JWT_SECRET=${{ secrets.JWT_SECRET }}
-          JWT_ENCRYPTION_SECRET=${{ secrets.JWT_ENCRYPTION_SECRET }}
-          JWT_EXPIRATION=900000
           IP_WHITELIST_ENABLED=true
           IP_WHITELIST_DEBUG=false
           EOF
