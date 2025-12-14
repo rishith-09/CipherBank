@@ -8,7 +8,7 @@ spring:
     url: jdbc:mysql://34.180.14.173:3306/cipherbank
     username: root
     password: password
-  # Just_Nothing
+  
   # JPA/Hibernate Configuration
   jpa:
     show-sql: false
