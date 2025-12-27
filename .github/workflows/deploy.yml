@@ -2,7 +2,7 @@ name: CipherBank Backend - Blue/Green Deploy
 
 on:
   push:
-    branches: [ release ]  # ← CHANGED: From 'main' to 'release'
+    branches: [ release ]
     paths:
       - 'src/**'
       - 'pom.xml'
@@ -121,40 +121,22 @@ jobs:
           echo "deploy_port=$DEPLOY_PORT" >> $GITHUB_OUTPUT
           echo "active_port=$ACTIVE_PORT" >> $GITHUB_OUTPUT
           
-          echo "🎯 Active: $ACTIVE_COLOR (port $ACTIVE_PORT)"
-          echo "🎯 Deploying to: $DEPLOY_COLOR (port $DEPLOY_PORT)"
+          echo "Active: $ACTIVE_COLOR (port $ACTIVE_PORT)"
+          echo "Deploying to: $DEPLOY_COLOR (port $DEPLOY_PORT)"
       
       # ==================== DEPLOY ====================
       - name: 📤 Upload JAR to Server
         run: |
           scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             ${{ steps.build.outputs.jar_file }} \
-            ${{ env.SSH_USER }}@${{ env.SSH_HOST }}:/home/bugsandfeaturesco/${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }}/app.jar
-      
-      - name: 📤 Upload Environment File
-        run: |
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
-            ${{ env.SSH_USER }}@${{ env.SSH_HOST }} << 'ENDSSH'
-            cat > /home/bugsandfeaturesco/${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }}/.env << 'EOF'
-          SERVER_PORT=${{ steps.detect_color.outputs.deploy_port }}
-          SPRING_PROFILES_ACTIVE=prod
-          DB_HOST=${{ secrets.DB_HOST }}
-          DB_PORT=${{ secrets.DB_PORT }}
-          DB_NAME=${{ secrets.DB_NAME }}
-          DB_USERNAME=${{ secrets.DB_USERNAME }}
-          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-          IP_WHITELIST_ENABLED=true
-          IP_WHITELIST_DEBUG=true
-          EOF
-          ENDSSH
+            ${{ env.SSH_USER }}@${{ env.SSH_HOST }}:/home/${{ env.SSH_USER }}/${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }}/app.jar
+          
+          echo "✅ JAR uploaded successfully"
       
       - name: 🔄 Restart Service
-        id: restart
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             ${{ env.SSH_USER }}@${{ env.SSH_HOST }} << 'ENDSSH'
-            set -e
-            
             echo "🔄 Restarting ${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }} service..."
             sudo systemctl restart ${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }}
             
@@ -174,38 +156,44 @@ jobs:
       - name: 🏥 Health Check
         id: health
         run: |
+          # Run health check and capture exit code explicitly
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
-            ${{ env.SSH_USER }}@${{ env.SSH_HOST }} << 'ENDSSH'
-            set -e
+            ${{ env.SSH_USER }}@${{ env.SSH_HOST }} bash << 'ENDSSH'
+          
+          MAX_ATTEMPTS=30
+          ATTEMPT=0
+          HEALTH_URL="http://localhost:${{ steps.detect_color.outputs.deploy_port }}${{ env.HEALTH_ENDPOINT }}"
+          
+          echo "🏥 Starting health checks on $HEALTH_URL"
+          
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            echo "Attempt $ATTEMPT/$MAX_ATTEMPTS..."
             
-            MAX_ATTEMPTS=30
-            ATTEMPT=0
-            HEALTH_URL="http://localhost:${{ steps.detect_color.outputs.deploy_port }}${{ env.HEALTH_ENDPOINT }}"
+            RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" 2>/dev/null || echo "000")
             
-            echo "🏥 Starting health checks on $HEALTH_URL"
+            if [ "$RESPONSE" = "200" ]; then
+              HEALTH_DATA=$(curl -s "$HEALTH_URL")
+              echo "✅ Health check passed!"
+              echo "Response: $HEALTH_DATA"
+              exit 0
+            fi
             
-            while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-              ATTEMPT=$((ATTEMPT + 1))
-              echo "Attempt $ATTEMPT/$MAX_ATTEMPTS..."
-              
-              RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" 2>/dev/null || echo "000")
-              
-              if [ "$RESPONSE" = "200" ]; then
-                HEALTH_DATA=$(curl -s "$HEALTH_URL")
-                echo "✅ Health check passed!"
-                echo "Response: $HEALTH_DATA"
-                exit 0
-              fi
-              
-              echo "⏳ Service not ready yet (HTTP $RESPONSE), waiting 2s..."
-              sleep 2
-            done
-            
-            echo "❌ Health check failed after $MAX_ATTEMPTS attempts"
-            echo "📋 Last 50 logs:"
-            sudo journalctl -u ${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }} -n 50 --no-pager
-            exit 1
+            echo "⏳ Service not ready yet (HTTP $RESPONSE), waiting 2s..."
+            sleep 2
+          done
+          
+          echo "❌ Health check failed after $MAX_ATTEMPTS attempts"
+          echo "📋 Last 50 logs:"
+          sudo journalctl -u ${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }} -n 50 --no-pager
+          exit 1
           ENDSSH
+          
+          # Check the exit code from SSH
+          if [ $? -ne 0 ]; then
+            echo "Health check failed"
+            exit 1
+          fi
       
       - name: 📢 Notify Health Check Success
         if: success()
@@ -223,30 +211,46 @@ jobs:
         id: switch
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
-            ${{ env.SSH_USER }}@${{ env.SSH_HOST }} << 'ENDSSH'
-            # REMOVED: set -e (was causing false failures)
-            
-            # Update nginx upstream configuration
-            PROXY_CONF="/www/server/panel/vhost/nginx/proxy/${{ env.APP_NAME }}.conf"
-            
-            # Create backup
-            sudo cp "$PROXY_CONF" "${PROXY_CONF}.backup"
-            
-            # Update port in proxy config
-            sudo sed -i 's/proxy_pass http:\/\/127\.0\.0\.1:[0-9]\+/proxy_pass http:\/\/127.0.0.1:${{ steps.detect_color.outputs.deploy_port }}/g' "$PROXY_CONF"
-            
-            # Test nginx config
-            if sudo nginx -t 2>&1; then
-              echo "✅ Nginx config valid"
-              sudo nginx -s reload
-              echo "✅ Nginx reloaded"
-            else
-              echo "❌ Nginx config invalid, restoring backup"
-              sudo mv "${PROXY_CONF}.backup" "$PROXY_CONF"
-              sudo nginx -s reload
-              exit 1
-            fi
+            ${{ env.SSH_USER }}@${{ env.SSH_HOST }} bash << 'ENDSSH'
+          
+          PROXY_CONF="/www/server/panel/vhost/nginx/proxy/${{ env.APP_NAME }}.conf"
+          
+          echo "📝 Updating nginx configuration..."
+          
+          # Create backup
+          sudo cp "$PROXY_CONF" "${PROXY_CONF}.backup"
+          
+          # Update port in proxy config using the actual pattern that exists
+          sudo sed -i 's|proxy_pass http://127\.0\.0\.1:[0-9]\{4\}|proxy_pass http://127.0.0.1:${{ steps.detect_color.outputs.deploy_port }}|g' "$PROXY_CONF"
+          
+          # Verify the change was made
+          if grep -q "proxy_pass http://127.0.0.1:${{ steps.detect_color.outputs.deploy_port }}" "$PROXY_CONF"; then
+            echo "✅ Port updated to ${{ steps.detect_color.outputs.deploy_port }}"
+          else
+            echo "❌ Failed to update port in config"
+            sudo cat "$PROXY_CONF"
+            exit 1
+          fi
+          
+          # Test nginx config
+          if sudo nginx -t 2>&1; then
+            echo "✅ Nginx config valid"
+            sudo nginx -s reload
+            echo "✅ Nginx reloaded"
+            exit 0
+          else
+            echo "❌ Nginx config invalid, restoring backup"
+            sudo mv "${PROXY_CONF}.backup" "$PROXY_CONF"
+            sudo nginx -s reload
+            exit 1
+          fi
           ENDSSH
+          
+          # Check the exit code from SSH
+          if [ $? -ne 0 ]; then
+            echo "Traffic switch failed"
+            exit 1
+          fi
       
       - name: 🧪 Verify Traffic Switch
         run: |
