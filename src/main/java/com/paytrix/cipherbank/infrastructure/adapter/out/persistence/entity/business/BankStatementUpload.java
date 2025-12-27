@@ -34,10 +34,6 @@ public class BankStatementUpload {
     )
     private BankProfile bank;
 
-//    // NEW
-//    @Column(name = "bank_parser_key", length = 64)
-//    private String bankParserKey;
-
     @OneToMany(mappedBy = "upload")
     private Set<BankStatement> statements;
 

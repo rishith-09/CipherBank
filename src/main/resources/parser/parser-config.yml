@@ -122,7 +122,7 @@ banks:
       reference:
         splitter: "/"
         partsCount: { mode: "oneOf", values: [4,5,6,7] }
-        orderId: { index: 4, trimNbsp: true }               # UPI reference at end
+        orderId: { index: 5, trimNbsp: true }               # UPI reference at end
         utr: { index: 1, cleanDigitsOnly: true }            # 12-digit number after UPI/
         utrFallback: { when: "missingOrNonNumeric", regex: "\\b\\d{12}\\b" }
 
