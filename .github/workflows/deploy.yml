@@ -342,7 +342,7 @@ jobs:
           • Target: ${{ steps.detect_color.outputs.deploy_color }} (port ${{ steps.detect_color.outputs.deploy_port }})
           
           📊 <b>Build Info</b>
-          • Commit:  <code>${{ steps.vars.outputs.COMMIT_SHA }}</code>
+          • Commit: <code>${{ steps.vars.outputs.COMMIT_SHA }}</code>
           • Author: ${{ steps.vars.outputs.AUTHOR }}
           
           🔄 <b>Status</b>
