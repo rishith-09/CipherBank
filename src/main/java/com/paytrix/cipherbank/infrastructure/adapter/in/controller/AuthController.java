@@ -1,11 +1,11 @@
 package com.paytrix.cipherbank.infrastructure.adapter.in.controller;
 
 import com.paytrix.cipherbank.application.port.in.AuthUseCase;
-import com.paytrix.cipherbank.infrastructure.adapter.out.persistence.entity.Role;
-import com.paytrix.cipherbank.infrastructure.adapter.out.persistence.entity.User;
+import com.paytrix.cipherbank.infrastructure.adapter.out.persistence.entity.security.Role;
+import com.paytrix.cipherbank.infrastructure.adapter.out.persistence.entity.security.User;
 import com.paytrix.cipherbank.domain.model.UserRegistrationRequest;
 import com.paytrix.cipherbank.domain.model.UserResponse;
-import com.paytrix.cipherbank.application.port.out.UserRepositoryPort;
+import com.paytrix.cipherbank.application.port.out.security.UserRepositoryPort;
 import com.paytrix.cipherbank.domain.model.ChangePasswordRequest;
 import com.paytrix.cipherbank.infrastructure.exception.ResourceNotFoundException;
 import jakarta.validation.Valid;

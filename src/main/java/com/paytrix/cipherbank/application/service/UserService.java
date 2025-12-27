@@ -1,8 +1,8 @@
 package com.paytrix.cipherbank.application.service;
 
 import com.paytrix.cipherbank.application.port.in.UserUseCase;
-import com.paytrix.cipherbank.application.port.out.UserRepositoryPort;
-import com.paytrix.cipherbank.infrastructure.adapter.out.persistence.entity.User;
+import com.paytrix.cipherbank.application.port.out.security.UserRepositoryPort;
+import com.paytrix.cipherbank.infrastructure.adapter.out.persistence.entity.security.User;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 

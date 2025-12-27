@@ -2,39 +2,116 @@ spring:
   application:
     name: cipherbank
 
-  # Database Configuration
-  datasource:
-    driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://34.180.14.173:3306/cipherbank
-    username: root
-    password: password
-    #just
-  # JPA/Hibernate Configuration
-  jpa:
-    show-sql: false
-    hibernate:
-      ddl-auto: update
-      naming:
-        physical-strategy: org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
-    properties:
-      hibernate:
-        dialect: org.hibernate.dialect.MySQLDialect
+  # ============================================================================
+  # DUAL DATABASE CONFIGURATION
+  # ============================================================================
 
-  # NEW: File Upload Configuration (IMPORTANT!)
+  # Security Database Configuration
+  # Database: cipherbank_security
+  # Tables: users, roles, user_roles, ip_whitelist
+  # Purpose: Authentication, authorization, IP whitelisting
+  datasource:
+    security:
+      driver-class-name: com.mysql.cj.jdbc.Driver
+      jdbc-url: jdbc:mysql://localhost:3306/paytrix?serverTimezone=UTC&allowPublicKeyRetrieval=true
+      username: root
+      password: root@123
+      hikari:
+        connection-timeout: 30000
+        maximum-pool-size: 10
+        minimum-idle: 5
+        idle-timeout: 600000
+        max-lifetime: 1800000
+        pool-name: SecurityHikariPool
+
+    # Business Database Configuration (PRIMARY)
+    # Database: cipherbank
+    # Tables: bank_statements, bank_profiles, bank_statement_uploads
+    # Purpose: Business logic, payment processing
+    business:
+      driver-class-name: com.mysql.cj.jdbc.Driver
+      jdbc-url: jdbc:mysql://localhost:3306/cipherbank?serverTimezone=UTC&allowPublicKeyRetrieval=true
+      username: root
+      password: root@123
+      hikari:
+        connection-timeout: 30000
+        maximum-pool-size: 20
+        minimum-idle: 10
+        idle-timeout: 600000
+        max-lifetime: 1800000
+        pool-name: BusinessHikariPool
+
+  # ============================================================================
+  # JPA CONFIGURATION - SECURITY DATABASE
+  # ============================================================================
+  jpa:
+    security:
+      show-sql: true
+      format-sql: true
+      hibernate:
+        ddl-auto: update
+        dialect: org.hibernate.dialect.MySQLDialect
+        naming:
+          physical-strategy: org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
+          implicit-strategy: org.springframework.boot.orm.jpa.hibernate.SpringImplicitNamingStrategy
+      properties:
+        hibernate:
+          dialect: org.hibernate.dialect.MySQLDialect
+          format_sql: true
+          use_sql_comments: true
+          jdbc:
+            batch_size: 20
+            fetch_size: 50
+          order_inserts: true
+          order_updates: true
+
+    # ============================================================================
+    # JPA CONFIGURATION - BUSINESS DATABASE (PRIMARY)
+    # ============================================================================
+    business:
+      show-sql: true
+      format-sql: true
+      hibernate:
+        ddl-auto: update
+        dialect: org.hibernate.dialect.MySQLDialect
+        naming:
+          physical-strategy: org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
+          implicit-strategy: org.springframework.boot.orm.jpa.hibernate.SpringImplicitNamingStrategy
+      properties:
+        hibernate:
+          dialect: org.hibernate.dialect.MySQLDialect
+          format_sql: true
+          use_sql_comments: true
+          jdbc:
+            batch_size: 20
+            fetch_size: 50
+          order_inserts: true
+          order_updates: true
+
+  # ============================================================================
+  # FILE UPLOAD CONFIGURATION
+  # ============================================================================
   servlet:
     multipart:
-      enabled: true                    # Enable multipart file upload
-      max-file-size: 10MB             # Maximum file size (matches controller validation)
-      max-request-size: 10MB          # Maximum request size
-      file-size-threshold: 0          # Threshold after which files are written to disk
-      location: /tmp                  # Temporary file storage location
+      enabled: true
+      max-file-size: 10MB
+      max-request-size: 10MB
+      file-size-threshold: 0
+      location: /tmp
 
-# Swagger/OpenAPI Configuration
+# ============================================================================
+# SWAGGER/OPENAPI CONFIGURATION
+# ============================================================================
 springdoc:
   api-docs:
     enabled: true
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui.html
 
-# JWT Configuration
+# ============================================================================
+# JWT CONFIGURATION
+# ============================================================================
 jwt:
   secret: secret-key1234-secret-key1234-admin   # 32+ chars for HS256
   encryption-secret: 3f7a9c1d2b4e5f8091a2b3c4d5e6f701   # 128 bits encryption key
@@ -46,13 +123,62 @@ security:
     enabled: true      # Set to false to disable IP whitelist filtering
     debug: false       # Set to true to see detailed IP extraction logs (useful for debugging proxy issues)
 
+# ============================================================================
+# LOGGING CONFIGURATION
+# ============================================================================
 logging:
   level:
     root: INFO
-    com.paytrix.cipherbank: INFO                 # Application logs
-    #    org.springframework.security: DEBUG        # show Spring Security logs
-    #    org.springframework.web: DEBUG             # show request mappings and endpoints
-    org.hibernate.SQL: DEBUG                   # show SQL queries
-    #    org.hibernate.type.descriptor.sql.BasicBinder: TRACE # show SQL parameter bindings
-    com.paytrix.cipherbank.infrastructure.security.IpWhitelistFilter: INFO  # IP whitelist logs
-    com.paytrix.cipherbank.infrastructure.util.IpAddressUtil: DEBUG  # IP extraction logs
+    # Security Database Logs
+    com.paytrix.cipherbank.infrastructure.adapter.out.persistence.repository.security: DEBUG
+    com.paytrix.cipherbank.infrastructure.adapter.out.persistence.adapter.security: DEBUG
+    # Business Database Logs
+    com.paytrix.cipherbank.infrastructure.adapter.out.persistence.repository.business: DEBUG
+    com.paytrix.cipherbank.infrastructure.adapter.out.persistence.adapter.business: DEBUG
+    # Hibernate SQL (shows queries from both databases)
+    org.hibernate.SQL: DEBUG
+    # org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+    # Application logs
+    com.paytrix.cipherbank: INFO
+    # DataSource logs (to see which database is being used)
+    com.zaxxer.hikari.HikariConfig: DEBUG
+    com.zaxxer.hikari.HikariDataSource: INFO
+#
+## ============================================================================
+## PROFILES (Optional - for environment-specific overrides)
+## ============================================================================
+#---
+#spring:
+#  config:
+#    activate:
+#      on-profile: dev
+#
+#  datasource:
+#    security:
+#      url: jdbc:mysql://localhost:3306/cipherbank_security_dev?serverTimezone=UTC
+#    business:
+#      url: jdbc:mysql://localhost:3306/cipherbank_dev?serverTimezone=UTC
+#
+#---
+#spring:
+#  config:
+#    activate:
+#      on-profile: prod
+#
+#  datasource:
+#    security:
+#      url: jdbc:mysql://paytrix-db.c7as80ggu1ks.ap-south-1.rds.amazonaws.com/cipherbank_security?serverTimezone=UTC&allowPublicKeyRetrieval=true
+#    business:
+#      url: jdbc:mysql://paytrix-db.c7as80ggu1ks.ap-south-1.rds.amazonaws.com/cipherbank?serverTimezone=UTC&allowPublicKeyRetrieval=true
+#
+#  jpa:
+#    security:
+#      show-sql: false
+#    business:
+#      show-sql: false
+#
+#logging:
+#  level:
+#    root: WARN
+#    com.paytrix.cipherbank: INFO
+#    org.hibernate.SQL: WARN

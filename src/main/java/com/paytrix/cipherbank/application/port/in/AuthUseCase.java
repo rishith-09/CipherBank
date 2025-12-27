@@ -1,6 +1,6 @@
 package com.paytrix.cipherbank.application.port.in;
 
-import com.paytrix.cipherbank.infrastructure.adapter.out.persistence.entity.User;
+import com.paytrix.cipherbank.infrastructure.adapter.out.persistence.entity.security.User;
 
 import java.util.List;
 

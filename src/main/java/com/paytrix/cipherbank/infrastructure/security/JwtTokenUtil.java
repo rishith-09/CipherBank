@@ -5,8 +5,8 @@ import com.nimbusds.jose.*;
 import com.nimbusds.jose.crypto.*;
 import com.nimbusds.jwt.*;
 
-import com.paytrix.cipherbank.infrastructure.adapter.out.persistence.entity.Role;
-import com.paytrix.cipherbank.infrastructure.adapter.out.persistence.entity.User;
+import com.paytrix.cipherbank.infrastructure.adapter.out.persistence.entity.security.Role;
+import com.paytrix.cipherbank.infrastructure.adapter.out.persistence.entity.security.User;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 

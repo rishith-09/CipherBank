@@ -1,7 +1,7 @@
 package com.paytrix.cipherbank.application.service;
 
-import com.paytrix.cipherbank.infrastructure.adapter.out.persistence.entity.IpWhitelist;
-import com.paytrix.cipherbank.application.port.out.IpWhitelistRepositoryPort;
+import com.paytrix.cipherbank.infrastructure.adapter.out.persistence.entity.security.IpWhitelist;
+import com.paytrix.cipherbank.application.port.out.security.IpWhitelistRepositoryPort;
 import org.springframework.stereotype.Service;
 
 import java.util.Set;

@@ -1,7 +1,7 @@
 package com.paytrix.cipherbank.infrastructure.security;
 
-import com.paytrix.cipherbank.application.port.out.UserRepositoryPort;
-import com.paytrix.cipherbank.infrastructure.adapter.out.persistence.entity.User;
+import com.paytrix.cipherbank.application.port.out.security.UserRepositoryPort;
+import com.paytrix.cipherbank.infrastructure.adapter.out.persistence.entity.security.User;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;

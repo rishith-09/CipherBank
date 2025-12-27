@@ -51,11 +51,12 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/change-password").authenticated()  // Any authenticated user
                         .requestMatchers("/api/debug/**").permitAll()         // Debug endpoints
                         .requestMatchers("/api/statements/**").permitAll()
+                        .requestMatchers("/api/payments/**").permitAll()
 
                         .anyRequest().authenticated()
                 );
 
-//        http.addFilterBefore(ipWhitelistFilter, UsernamePasswordAuthenticationFilter.class);
+        http.addFilterBefore(ipWhitelistFilter, UsernamePasswordAuthenticationFilter.class);
         http.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
 //        http.httpBasic(basic -> {}); // optional: enable basic for quick debugging
