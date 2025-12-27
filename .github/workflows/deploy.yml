@@ -224,7 +224,7 @@ jobs:
           sudo sed -i 's|proxy_pass http://127\.0\.0\.1:[0-9]\{4\}|proxy_pass http://127.0.0.1:${{ steps.detect_color.outputs.deploy_port }}|g' "$PROXY_CONF"
           
           # Verify the change was made
-          if grep -q "proxy_pass http://127.0.0.1:${{ steps.detect_color.outputs.deploy_port }}" "$PROXY_CONF"; then
+          if sudo grep -q "proxy_pass http://127.0.0.1:${{ steps.detect_color.outputs.deploy_port }}" "$PROXY_CONF"; then
             echo "✅ Port updated to ${{ steps.detect_color.outputs.deploy_port }}"
           else
             echo "❌ Failed to update port in config"
