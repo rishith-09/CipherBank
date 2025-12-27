@@ -13,9 +13,9 @@ spring:
   datasource:
     security:
       driver-class-name: com.mysql.cj.jdbc.Driver
-      jdbc-url: jdbc:mysql://localhost:3306/paytrix?serverTimezone=UTC&allowPublicKeyRetrieval=true
+      jdbc-url: jdbc:mysql://34.180.14.173:3306/paytrix_db?serverTimezone=UTC&allowPublicKeyRetrieval=true
       username: root
-      password: root@123
+      password: password
       hikari:
         connection-timeout: 30000
         maximum-pool-size: 10
@@ -30,9 +30,9 @@ spring:
     # Purpose: Business logic, payment processing
     business:
       driver-class-name: com.mysql.cj.jdbc.Driver
-      jdbc-url: jdbc:mysql://localhost:3306/cipherbank?serverTimezone=UTC&allowPublicKeyRetrieval=true
+      jdbc-url: jdbc:mysql://34.180.14.173:3306/cipherbank?serverTimezone=UTC&allowPublicKeyRetrieval=true
       username: root
-      password: root@123
+      password: password
       hikari:
         connection-timeout: 30000
         maximum-pool-size: 20
