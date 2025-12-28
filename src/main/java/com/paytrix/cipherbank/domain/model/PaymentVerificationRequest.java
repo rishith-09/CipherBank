@@ -18,7 +18,7 @@ import java.math.BigDecimal;
  * - orderId: OPTIONAL
  * - utr: OPTIONAL
  * - At least ONE of orderId or utr must be provided
- * - accountNo: NOT in request (comes from database)
+ * - accountNo: OPTIONAL - when provided, filters matches to only this account
  */
 @Data
 @NoArgsConstructor
@@ -38,4 +38,6 @@ public class PaymentVerificationRequest {
     @NotNull(message = "Amount is required")
     @DecimalMin(value = "0.01", message = "Amount must be greater than 0")
     private BigDecimal amt;
+
+    private Long accountNo;
 }

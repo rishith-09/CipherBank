@@ -51,4 +51,40 @@ public interface BankStatementRepositoryPort {
      * @return List of unprocessed matching statements
      */
     List<BankStatement> findUnprocessedByUtr(String utr);
+
+    // NEW METHODS WITH ACCOUNT NUMBER FILTER
+
+    /**
+     * Find ALL unprocessed statements matching orderId and utr for specific account
+     * Only returns records where processed = false and accountNo matches
+     * Returns list to detect multiple matches (data inconsistency)
+     *
+     * @param orderId Order ID
+     * @param utr Unique Transaction Reference
+     * @param accountNo Account Number to filter by
+     * @return List of unprocessed matching statements for this account
+     */
+    List<BankStatement> findUnprocessedByOrderIdAndUtr(String orderId, String utr, Long accountNo);
+
+    /**
+     * Find ALL unprocessed statements matching orderId for specific account
+     * Only returns records where processed = false and accountNo matches
+     * Returns list to detect multiple matches (data inconsistency)
+     *
+     * @param orderId Order ID
+     * @param accountNo Account Number to filter by
+     * @return List of unprocessed matching statements for this account
+     */
+    List<BankStatement> findUnprocessedByOrderId(String orderId, Long accountNo);
+
+    /**
+     * Find ALL unprocessed statements matching utr for specific account
+     * Only returns records where processed = false and accountNo matches
+     * Returns list to detect multiple matches (data inconsistency)
+     *
+     * @param utr Unique Transaction Reference
+     * @param accountNo Account Number to filter by
+     * @return List of unprocessed matching statements for this account
+     */
+    List<BankStatement> findUnprocessedByUtr(String utr, Long accountNo);
 }

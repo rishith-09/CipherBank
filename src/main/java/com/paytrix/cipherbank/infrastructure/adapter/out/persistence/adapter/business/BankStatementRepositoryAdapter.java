@@ -49,4 +49,24 @@ public class BankStatementRepositoryAdapter implements BankStatementRepositoryPo
         // Only find records where processed = false (0)
         return jpa.findByUtrAndProcessed(utr, false);
     }
+
+    // NEW METHODS WITH ACCOUNT NUMBER FILTER
+
+    @Override
+    public List<BankStatement> findUnprocessedByOrderIdAndUtr(String orderId, String utr, Long accountNo) {
+        // Only find records where processed = false (0) and accountNo matches
+        return jpa.findByOrderIdAndUtrAndProcessedAndAccountNo(orderId, utr, false, accountNo);
+    }
+
+    @Override
+    public List<BankStatement> findUnprocessedByOrderId(String orderId, Long accountNo) {
+        // Only find records where processed = false (0) and accountNo matches
+        return jpa.findByOrderIdAndProcessedAndAccountNo(orderId, false, accountNo);
+    }
+
+    @Override
+    public List<BankStatement> findUnprocessedByUtr(String utr, Long accountNo) {
+        // Only find records where processed = false (0) and accountNo matches
+        return jpa.findByUtrAndProcessedAndAccountNo(utr, false, accountNo);
+    }
 }

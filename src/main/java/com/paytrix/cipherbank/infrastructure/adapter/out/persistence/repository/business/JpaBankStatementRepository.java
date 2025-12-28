@@ -51,4 +51,46 @@ public interface JpaBankStatementRepository extends JpaRepository<BankStatement,
      * @return List of unprocessed matching statements
      */
     List<BankStatement> findByUtrAndProcessed(String utr, boolean processed);
+
+    // NEW METHODS WITH ACCOUNT NUMBER FILTER
+
+    /**
+     * Find ALL unprocessed statements matching orderId and utr for specific account
+     * Only returns records where processed = false and accountNo matches
+     * Returns list to detect multiple matches (data inconsistency)
+     *
+     * @param orderId Order ID
+     * @param utr Unique Transaction Reference
+     * @param processed Process status (should be false)
+     * @param accountNo Account Number
+     * @return List of unprocessed matching statements for this account
+     */
+    List<BankStatement> findByOrderIdAndUtrAndProcessedAndAccountNo(
+            String orderId, String utr, boolean processed, Long accountNo);
+
+    /**
+     * Find ALL unprocessed statements matching orderId for specific account
+     * Only returns records where processed = false and accountNo matches
+     * Returns list to detect multiple matches (data inconsistency)
+     *
+     * @param orderId Order ID
+     * @param processed Process status (should be false)
+     * @param accountNo Account Number
+     * @return List of unprocessed matching statements for this account
+     */
+    List<BankStatement> findByOrderIdAndProcessedAndAccountNo(
+            String orderId, boolean processed, Long accountNo);
+
+    /**
+     * Find ALL unprocessed statements matching utr for specific account
+     * Only returns records where processed = false and accountNo matches
+     * Returns list to detect multiple matches (data inconsistency)
+     *
+     * @param utr Unique Transaction Reference
+     * @param processed Process status (should be false)
+     * @param accountNo Account Number
+     * @return List of unprocessed matching statements for this account
+     */
+    List<BankStatement> findByUtrAndProcessedAndAccountNo(
+            String utr, boolean processed, Long accountNo);
 }
