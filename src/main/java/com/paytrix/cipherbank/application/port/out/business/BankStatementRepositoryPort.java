@@ -8,18 +8,29 @@ public interface BankStatementRepositoryPort {
     BankStatement save(BankStatement stmt);
 
     /**
-     * Check if a duplicate statement already exists
-     * A duplicate is defined as having the same combination of:
-     * - UTR (Unique Transaction Reference)
-     * - Order ID
-     * - Account Number
+     * DEPRECATED: This method checks the 3-column constraint (utr, order_id, account_no)
+     * but doesn't prevent violations of the 2-column constraint (account_no, utr).
+     * Use existsByAccountNoAndUtr() instead for proper deduplication.
      *
-     * @param utr Transaction reference number
-     * @param orderId Order/transaction ID
+     * @deprecated Use {@link #existsByAccountNoAndUtr(Long, String)} instead
+     */
+    @Deprecated
+    boolean existsByUtrAndOrderIdAndAccountNo(String utr, String orderId, Long accountNo);
+
+    /**
+     * Check if a statement exists with the same account number and UTR.
+     * This matches the database constraint uk_stmt_acct_utr (account_no, utr).
+     *
+     * CRITICAL: This is the correct deduplication check to use because:
+     * - Database constraint #2 enforces uniqueness on (account_no, utr) only
+     * - Same UTR can appear multiple times with different order_ids
+     * - This prevents DataIntegrityViolationException at save time
+     *
      * @param accountNo Account number
+     * @param utr Unique Transaction Reference
      * @return true if duplicate exists, false otherwise
      */
-    boolean existsByUtrAndOrderIdAndAccountNo(String utr, String orderId, Long accountNo);
+    boolean existsByAccountNoAndUtr(Long accountNo, String utr);
 
     /**
      * Find ALL unprocessed statements matching orderId and utr combination
@@ -51,40 +62,4 @@ public interface BankStatementRepositoryPort {
      * @return List of unprocessed matching statements
      */
     List<BankStatement> findUnprocessedByUtr(String utr);
-
-    // NEW METHODS WITH ACCOUNT NUMBER FILTER
-
-    /**
-     * Find ALL unprocessed statements matching orderId and utr for specific account
-     * Only returns records where processed = false and accountNo matches
-     * Returns list to detect multiple matches (data inconsistency)
-     *
-     * @param orderId Order ID
-     * @param utr Unique Transaction Reference
-     * @param accountNo Account Number to filter by
-     * @return List of unprocessed matching statements for this account
-     */
-    List<BankStatement> findUnprocessedByOrderIdAndUtr(String orderId, String utr, Long accountNo);
-
-    /**
-     * Find ALL unprocessed statements matching orderId for specific account
-     * Only returns records where processed = false and accountNo matches
-     * Returns list to detect multiple matches (data inconsistency)
-     *
-     * @param orderId Order ID
-     * @param accountNo Account Number to filter by
-     * @return List of unprocessed matching statements for this account
-     */
-    List<BankStatement> findUnprocessedByOrderId(String orderId, Long accountNo);
-
-    /**
-     * Find ALL unprocessed statements matching utr for specific account
-     * Only returns records where processed = false and accountNo matches
-     * Returns list to detect multiple matches (data inconsistency)
-     *
-     * @param utr Unique Transaction Reference
-     * @param accountNo Account Number to filter by
-     * @return List of unprocessed matching statements for this account
-     */
-    List<BankStatement> findUnprocessedByUtr(String utr, Long accountNo);
 }

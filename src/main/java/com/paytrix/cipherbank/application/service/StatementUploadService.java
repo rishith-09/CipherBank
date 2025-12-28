@@ -65,20 +65,18 @@ public class StatementUploadService implements StatementUploadUseCase {
             log.info("Parsed {} rows from file: {}", parsed, cmd.originalFilename());
 
             for (var r : rows) {
-                // DEDUPLICATION CHECK - Check if record already exists with same UTR, Order ID, and Account No
                 Long accountNumber = r.getAccountNo() != null ? Long.parseLong(r.getAccountNo()) : null;
 
-                boolean isDuplicate = stmtRepo.existsByUtrAndOrderIdAndAccountNo(
-                        r.getUtr(),
-                        r.getOrderId(),
-                        accountNumber
-                );
+                // FIXED DEDUPLICATION CHECK
+                // Now checks against constraint uk_stmt_acct_utr (account_no, utr)
+                // This prevents DataIntegrityViolationException at save time
+                boolean isDuplicate = stmtRepo.existsByAccountNoAndUtr(accountNumber, r.getUtr());
 
                 if (isDuplicate) {
                     // Skip this record - it's a duplicate
                     deduped++;
-                    log.debug("Skipped duplicate: UTR={}, OrderID={}, AccountNo={}",
-                            r.getUtr(), r.getOrderId(), accountNumber);
+                    log.debug("Skipped duplicate: AccountNo={}, UTR={} (OrderID may differ)",
+                            accountNumber, r.getUtr());
                     continue;
                 }
 
@@ -101,13 +99,13 @@ public class StatementUploadService implements StatementUploadUseCase {
                 var saved = stmtRepo.save(s);
                 if (saved != null) {
                     inserted++;
-                    log.debug("Inserted statement: UTR={}, OrderID={}, AccountNo={}",
-                            r.getUtr(), r.getOrderId(), accountNumber);
+                    log.debug("Inserted statement: AccountNo={}, UTR={}, OrderID={}",
+                            accountNumber, r.getUtr(), r.getOrderId());
                 } else {
-                    // Save failed (might be caught by DB constraint as backup)
+                    // Save failed (race condition - another process inserted between check and save)
                     deduped++;
-                    log.warn("Failed to save statement (DB constraint): UTR={}, OrderID={}, AccountNo={}",
-                            r.getUtr(), r.getOrderId(), accountNumber);
+                    log.warn("Race condition detected: Record inserted by another process - AccountNo={}, UTR={}",
+                            accountNumber, r.getUtr());
                 }
             }
 

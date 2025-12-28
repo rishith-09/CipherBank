@@ -169,7 +169,7 @@ public class PaymentVerificationService implements PaymentVerificationUseCase {
 
         // PRIORITY 1: Check for exact match (orderId + utr) for this account
         List<BankStatement> exactMatches = statementRepository.findUnprocessedByOrderIdAndUtr(
-                request.getOrderId(), request.getUtr(), accountNo);
+                request.getOrderId(), request.getUtr());
 
         if (!exactMatches.isEmpty()) {
             log.info("Found {} unprocessed record(s) for exact match (orderId + utr) in Account {}: OrderId={}, UTR={}",
@@ -187,7 +187,7 @@ public class PaymentVerificationService implements PaymentVerificationUseCase {
 
         // PRIORITY 2: Check for orderId match only for this account
         List<BankStatement> orderIdMatches = statementRepository.findUnprocessedByOrderId(
-                request.getOrderId(), accountNo);
+                request.getOrderId());
 
         if (!orderIdMatches.isEmpty()) {
             log.info("Found {} unprocessed record(s) for orderId match in Account {}: OrderId={} (UTR mismatch)",
@@ -204,7 +204,7 @@ public class PaymentVerificationService implements PaymentVerificationUseCase {
 
         // PRIORITY 3: Check for utr match only for this account
         List<BankStatement> utrMatches = statementRepository.findUnprocessedByUtr(
-                request.getUtr(), accountNo);
+                request.getUtr());
 
         if (!utrMatches.isEmpty()) {
             log.info("Found {} unprocessed record(s) for UTR match in Account {}: UTR={} (OrderId mismatch)",
@@ -270,7 +270,7 @@ public class PaymentVerificationService implements PaymentVerificationUseCase {
         log.info("Matching with ONLY orderId (no UTR provided) (ACCOUNT {})", accountNo);
 
         List<BankStatement> orderIdMatches = statementRepository.findUnprocessedByOrderId(
-                request.getOrderId(), accountNo);
+                request.getOrderId());
 
         if (!orderIdMatches.isEmpty()) {
             log.info("Found {} unprocessed record(s) for orderId in Account {}: OrderId={}",
@@ -336,7 +336,7 @@ public class PaymentVerificationService implements PaymentVerificationUseCase {
         log.info("Matching with ONLY utr (no orderId provided) (ACCOUNT {})", accountNo);
 
         List<BankStatement> utrMatches = statementRepository.findUnprocessedByUtr(
-                request.getUtr(), accountNo);
+                request.getUtr());
 
         if (!utrMatches.isEmpty()) {
             log.info("Found {} unprocessed record(s) for UTR in Account {}: UTR={}",

@@ -14,9 +14,7 @@ import java.time.LocalDateTime;
 @Table(name = "bank_statements",
         uniqueConstraints = {
                 @UniqueConstraint(name = "uk_stmt_upload_utr", columnNames = {"bank_upload_id", "utr"}),
-                @UniqueConstraint(name = "uk_stmt_acct_utr", columnNames = {"account_no", "utr"}),
-                // NEW: Unique constraint for deduplication - prevents duplicate entries with same UTR, Order ID, and Account No
-                @UniqueConstraint(name = "uk_stmt_utr_order_acct", columnNames = {"utr", "order_id", "account_no"})
+                @UniqueConstraint(name = "uk_stmt_acct_utr", columnNames = {"account_no", "utr"})
         },
         indexes = {
                 @Index(name = "idx_stmt_txn_dt", columnList = "transaction_date_time"),
